@@ -192,19 +192,9 @@ const AccountDetail: React.FC = () => {
   useEffect(() => { fetchData(); }, [decodedKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { fetchModels(); }, [decodedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Poll active sessions every 5s
-  useEffect(() => {
-    const poll = async () => {
-      try {
-        const accounts = await api.listAccounts();
-        const acc = accounts.find((a) => a.user_id === decodedKey);
-        if (acc) setActiveSessions(acc.active_sessions);
-      } catch { /* ignore */ }
-    };
-    poll();
-    const id = setInterval(poll, 5000);
-    return () => clearInterval(id);
-  }, [decodedKey]);
+  // active_sessions is always 0 on the edge port (no in-memory session tracker), so
+  // there is nothing to poll — the previous 5s listAccounts() poll was wasteful and
+  // non-functional. activeSessions stays 0; the badge shows 无活跃会话. (P3)
 
   const handleModelChange = async (newModel: string) => {
     setSavingModel(true);

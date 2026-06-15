@@ -20,8 +20,29 @@ import { resolveAccount } from '../../src/proxy/resolve';
  */
 export type V1Data = {
   account?: Account;
+  settings?: Record<string, string>;
   [k: string]: unknown;
 };
+
+/**
+ * Per-request settings batch (P2): load the handful of settings the /v1/* hot path
+ * reads ONCE per request, memoized on the shared data bag so handlers reusing ctx
+ * don't re-query D1. Returns a key→value map (missing keys are absent).
+ */
+const REQ_SETTING_KEYS = ['enable_claude', 'default_model', 'enable_request_logging'];
+export async function ensureSettings(ctx: { env: Env; data: V1Data }): Promise<Record<string, string>> {
+  if (!ctx.data.settings) {
+    const { results } = await ctx.env.DB.prepare(
+      `SELECT key, value FROM settings WHERE key IN (${REQ_SETTING_KEYS.map(() => '?').join(',')})`
+    )
+      .bind(...REQ_SETTING_KEYS)
+      .all<{ key: string; value: string }>();
+    const m: Record<string, string> = {};
+    for (const r of results ?? []) m[r.key] = r.value;
+    ctx.data.settings = m;
+  }
+  return ctx.data.settings;
+}
 
 /**
  * Error-shape choice for the "no account" case:

@@ -10,6 +10,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   const { results } = await env.DB.prepare('SELECT key, value FROM settings').all<{ key: string; value: string }>();
   const settings: Record<string, string> = {};
   for (const row of results ?? []) {
+    // Hide internal/cache keys (underscore-prefixed, e.g. _upstream_models_*). (P4)
+    if (row.key.startsWith('_')) continue;
     settings[row.key] = row.value;
   }
   return Response.json({ settings });

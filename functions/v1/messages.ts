@@ -35,10 +35,10 @@
 //   - Logging: usage is captured during the stream and flushed via waitUntil
 //     when the stream completes (Go captured via requestLogMiddleware).
 import type { Env, Account, RequestLogRow } from '../../src/types';
-import { SettingKeys } from '../../src/types';
 import type { V1Data } from './_middleware';
+import { ensureSettings } from './_middleware';
 import { createStore } from '../../src/store/d1';
-import { getSetting, getBoolSetting } from '../../src/store/settings';
+import { getSetting } from '../../src/store/settings';
 import { readJson, jsonError } from '../../src/util/http';
 import { createJoyClient } from '../../src/joycode/client';
 import { msgId, tooluId } from '../../src/util/id';
@@ -106,12 +106,13 @@ export const onRequestPost: PagesFunction<Env, string, V1Data> = async (ctx) => 
   // enable_claude on AND model is Claude-family → native path. Go forces stream
   // for native; non-stream+native has no Go handler so we fall back to the
   // translated non-stream path (task spec).
-  const nativeEnabled = (await getBoolSetting(env.DB, SettingKeys.enableClaude, 'false')) === 'true';
+  const settings = await ensureSettings(ctx);
+  const nativeEnabled = (settings['enable_claude'] ?? 'false') === 'true';
   const nativeModel =
     nativeEnabled &&
     (isNativeAnthropicModel(req.model) ||
       isNativeAnthropicModel(
-        resolveModel(req.model ?? '', account.defaultModel ?? '', (await getSetting(env.DB, 'default_model')) ?? ''),
+        resolveModel(req.model ?? '', account.defaultModel ?? '', settings['default_model'] ?? ''),
       ));
 
   if (nativeModel) {
@@ -140,7 +141,7 @@ async function handleNonStream(
 ): Promise<Response> {
   const { env, waitUntil } = ctx;
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
-  const systemDefault = (await getSetting(env.DB, 'default_model')) ?? '';
+  const systemDefault = (await ensureSettings(ctx))['default_model'] ?? '';
 
   const jcBody = translateRequest(req, account.defaultModel ?? '', systemDefault);
 
@@ -218,7 +219,7 @@ async function handleStream(
 ): Promise<Response> {
   const { env, waitUntil } = ctx;
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
-  const systemDefault = (await getSetting(env.DB, 'default_model')) ?? '';
+  const systemDefault = (await ensureSettings(ctx))['default_model'] ?? '';
 
   const jcBody = translateRequest(req, account.defaultModel ?? '', systemDefault);
   jcBody['stream'] = true;
@@ -542,7 +543,7 @@ async function handleNativeAnthropicStream(
 ): Promise<Response> {
   const { env, waitUntil } = ctx;
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
-  const systemDefault = (await getSetting(env.DB, 'default_model')) ?? '';
+  const systemDefault = (await ensureSettings(ctx))['default_model'] ?? '';
 
   const body = translateAnthropicRequest(req, account.defaultModel ?? '', systemDefault);
 
@@ -677,7 +678,7 @@ async function handleNativeAnthropicStream(
         const outputTokens = outTk;
         waitUntil(
           (async () => {
-            const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
+            const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
             if (enableLogging) {
               await store.logRequest(
                 makeLog(account.userId, model, '/v1/messages', true, 200, started, '', inputTokens, outputTokens),

@@ -16,8 +16,8 @@
 //   - Timeout detection (isTimeoutError, chat.go:104-110) maps to 504.
 import type { Env, Account, RequestLogRow } from '../../../src/types';
 import type { V1Data } from '../_middleware';
+import { ensureSettings } from '../_middleware';
 import { createStore } from '../../../src/store/d1';
-import { getSetting } from '../../../src/store/settings';
 import { readJson, jsonError } from '../../../src/util/http';
 import { createJoyClient } from '../../../src/joycode/client';
 import { MODELS } from '../../../src/joycode/models';
@@ -51,7 +51,7 @@ export const onRequestPost: PagesFunction<Env, string, V1Data> = async (ctx) => 
     return e instanceof Response ? e : jsonError(400, 'invalid JSON body');
   }
 
-  const systemDefault = await getSetting(env.DB, 'default_model');
+  const systemDefault = (await ensureSettings(ctx))['default_model'] ?? null;
   const model = resolveModel(
     typeof body.model === 'string' ? body.model : '',
     account.defaultModel ?? '',
@@ -109,7 +109,7 @@ async function handleNonStream(
     outputTokens = numOr(usage['completion_tokens']);
   }
 
-  const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
+  const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
   if (enableLogging) {
     waitUntil(
       store.logRequest(makeLog(account.userId, model, '/v1/chat/completions', false, 200, started, '', inputTokens, outputTokens))
@@ -219,7 +219,7 @@ async function handleStream(
         inputTokens = numOr(lastUsageObj['prompt_tokens']);
         outputTokens = numOr(lastUsageObj['completion_tokens']);
       }
-      const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
+      const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
       if (enableLogging) {
         await store.logRequest(
           makeLog(account.userId, model, '/v1/chat/completions', true, 200, started, '', inputTokens, outputTokens)

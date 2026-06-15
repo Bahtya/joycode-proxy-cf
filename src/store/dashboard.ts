@@ -90,8 +90,9 @@ export interface DashboardLog {
   created_at: string;
 }
 
-// "Today" filter in UTC (D1 stores datetime('now') = UTC).
-const TODAY = "date(created_at) = date('now')";
+// "Today" filter in UTC (D1 stores datetime('now') = UTC). Sargable range form so
+// idx_request_logs_created(created_at) can be used (the date()= wrapper was not). (P1)
+const TODAY = "created_at >= datetime('now', 'start of day')";
 // "Last 24 hours" window in UTC.
 const LAST_24H = "created_at >= datetime('now', '-24 hours')";
 
@@ -131,45 +132,15 @@ export async function getStats(
   db: D1Database,
   opts: { userId?: string; days?: number } = {}
 ): Promise<GlobalStats> {
-  const scope = opts.userId ? `AND api_key = ?` : '';
-  const binds = opts.userId ? [opts.userId] : [];
-
+  const scoped = !!opts.userId;
+  const scope = scoped ? `AND api_key = ?` : '';
+  const binds: string[] = scoped ? [opts.userId as string] : [];
   const todayFilter = `WHERE ${TODAY} ${scope}`;
-  const scalar = async <T>(sql: string): Promise<T | null> => {
-    const stmt = db.prepare(sql);
-    return safeFirst<T>(binds.length ? stmt.bind(...binds).first<T>() : stmt.first<T>());
-  };
+  const bind = <T>(stmt: D1PreparedStatement): D1PreparedStatement => (binds.length ? stmt.bind(...binds) : stmt);
 
-  const totalRequests = (await scalar<{ n: number }>(`SELECT COUNT(*) AS n FROM request_logs ${todayFilter}`))?.n ?? 0;
-  const avgLatency =
-    (await scalar<{ a: number }>(`SELECT COALESCE(AVG(latency_ms), 0) AS a FROM request_logs ${todayFilter}`))?.a ?? 0;
-  const errorCount =
-    (await scalar<{ n: number }>(`SELECT COUNT(*) AS n FROM request_logs ${todayFilter} AND status_code >= 400`))?.n ??
-    0;
-  const streamCount =
-    (await scalar<{ n: number }>(`SELECT COUNT(*) AS n FROM request_logs ${todayFilter} AND stream = 1`))?.n ?? 0;
-  const successCount =
-    (await scalar<{ n: number }>(`SELECT COUNT(*) AS n FROM request_logs ${todayFilter} AND status_code < 400`))?.n ??
-    0;
-  const totalInput =
-    (await scalar<{ s: number }>(`SELECT COALESCE(SUM(input_tokens), 0) AS s FROM request_logs ${todayFilter}`))?.s ??
-    0;
-  const totalOutput =
-    (await scalar<{ s: number }>(`SELECT COALESCE(SUM(output_tokens), 0) AS s FROM request_logs ${todayFilter}`))?.s ??
-    0;
-
-  const accountsCount = (await db.prepare('SELECT COUNT(*) AS n FROM accounts').first<{ n: number }>())?.n ?? 0;
-
-  // by_model
-  const byModelStmt = db.prepare(
-    `SELECT model AS model, COUNT(*) AS count FROM request_logs ${todayFilter} AND model != '' GROUP BY model ORDER BY count DESC`
-  );
-  const byModelRes = binds.length ? await byModelStmt.bind(...binds).all<ModelCount>() : await byModelStmt.all<ModelCount>();
-  const by_model = byModelRes.results ?? [];
-
-  // by_account — only meaningful for the global view (no userId scope).
-  let by_account: AccountCount[] = [];
-  if (!opts.userId) {
+  // by_account is global-only and runs its 2 sub-queries as one unit.
+  const byAccount = async (): Promise<AccountCount[]> => {
+    if (scoped) return [];
     const { results: accts } = await db
       .prepare('SELECT user_id, nickname, remark FROM accounts ORDER BY display_order, created_at')
       .all<{ user_id: string; nickname: string; remark: string }>();
@@ -178,61 +149,84 @@ export async function getStats(
     const { results: raw } = await db
       .prepare(`SELECT api_key AS user_id, COUNT(*) AS count FROM request_logs WHERE ${TODAY} GROUP BY api_key ORDER BY count DESC`)
       .all<{ user_id: string; count: number }>();
+    const out: AccountCount[] = [];
     let other = 0;
     for (const r of raw) {
       if (validKeys.has(r.user_id)) {
         const meta = nameMap.get(r.user_id);
-        by_account.push({
-          user_id: r.user_id,
-          nickname: meta?.nickname ?? '',
-          remark: meta?.remark ?? '',
-          count: r.count,
-        });
+        out.push({ user_id: r.user_id, nickname: meta?.nickname ?? '', remark: meta?.remark ?? '', count: r.count });
       } else {
         other += r.count;
       }
     }
-    if (other > 0) {
-      by_account.push({ user_id: '其他', nickname: '其他', remark: '', count: other });
-    }
-  }
+    if (other > 0) out.push({ user_id: '其他', nickname: '其他', remark: '', count: other });
+    return out;
+  };
 
-  const all_time = await getAllTimeTotals(db, opts.userId);
-  const hourly = await getHourlyStats(db, opts.userId);
+  // Collapse the 7 sequential scalar scans into ONE conditional-aggregation query and
+  // run the independent queries in parallel. (P1)
+  const [agg, accountsCountRow, byModelRes, by_account, all_time, hourly] = await Promise.all([
+    bind(
+      db.prepare(
+        `SELECT
+           COUNT(*) AS total_requests,
+           COALESCE(AVG(latency_ms), 0) AS avg_latency,
+           SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count,
+           SUM(CASE WHEN stream = 1 THEN 1 ELSE 0 END) AS stream_count,
+           SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) AS success_count,
+           COALESCE(SUM(input_tokens), 0) AS total_input,
+           COALESCE(SUM(output_tokens), 0) AS total_output
+         FROM request_logs ${todayFilter}`
+      )
+    ).first<{
+      total_requests: number; avg_latency: number; error_count: number;
+      stream_count: number; success_count: number; total_input: number; total_output: number;
+    }>(),
+    db.prepare('SELECT COUNT(*) AS n FROM accounts').first<{ n: number }>(),
+    bind(
+      db.prepare(
+        `SELECT model AS model, COUNT(*) AS count FROM request_logs ${todayFilter} AND model != '' GROUP BY model ORDER BY count DESC`
+      )
+    ).all<ModelCount>(),
+    byAccount(),
+    getAllTimeTotals(db, opts.userId),
+    getHourlyStats(db, opts.userId),
+  ]);
 
   return {
-    total_requests: totalRequests,
-    total_input_tokens: totalInput,
-    total_output_tokens: totalOutput,
-    accounts_count: accountsCount,
-    avg_latency_ms: avgLatency,
-    error_count: errorCount,
-    stream_count: streamCount,
-    success_count: successCount,
-    by_model,
+    total_requests: agg?.total_requests ?? 0,
+    total_input_tokens: agg?.total_input ?? 0,
+    total_output_tokens: agg?.total_output ?? 0,
+    accounts_count: accountsCountRow?.n ?? 0,
+    avg_latency_ms: agg?.avg_latency ?? 0,
+    error_count: agg?.error_count ?? 0,
+    stream_count: agg?.stream_count ?? 0,
+    success_count: agg?.success_count ?? 0,
+    by_model: byModelRes.results ?? [],
     by_account,
     all_time,
     hourly,
   };
 }
 
-/** All-time totals (store.GetAllTimeTotals), optionally scoped to one account. */
+/** All-time totals (store.GetAllTimeTotals), optionally scoped to one account.
+ *  Single conditional-aggregation query (was 4 sequential scans). (P1) */
 export async function getAllTimeTotals(db: D1Database, userId?: string): Promise<AllTimeTotals> {
   const scope = userId ? `WHERE api_key = ?` : '';
-  const run = <T>(sql: string) => (userId ? db.prepare(sql).bind(userId).first<T>() : db.prepare(sql).first<T>());
-  const totalRequests = (await run<{ n: number }>('SELECT COUNT(*) AS n FROM request_logs ' + scope))?.n ?? 0;
-  const totalInput =
-    (await run<{ s: number }>(`SELECT COALESCE(SUM(input_tokens), 0) AS s FROM request_logs ${scope}`))?.s ?? 0;
-  const totalOutput =
-    (await run<{ s: number }>(`SELECT COALESCE(SUM(output_tokens), 0) AS s FROM request_logs ${scope}`))?.s ?? 0;
-  const errorCount =
-    (await run<{ n: number }>(`SELECT COUNT(*) AS n FROM request_logs ${scope} ${userId ? 'AND' : 'WHERE'} status_code >= 400`))?.n ??
-    0;
+  const sql = `SELECT
+      COUNT(*) AS total_requests,
+      COALESCE(SUM(input_tokens), 0) AS total_input,
+      COALESCE(SUM(output_tokens), 0) AS total_output,
+      SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count
+    FROM request_logs ${scope}`;
+  const row = await (userId ? db.prepare(sql).bind(userId) : db.prepare(sql)).first<{
+    total_requests: number; total_input: number; total_output: number; error_count: number;
+  }>();
   return {
-    total_requests: totalRequests,
-    total_input_tokens: totalInput,
-    total_output_tokens: totalOutput,
-    error_count: errorCount,
+    total_requests: row?.total_requests ?? 0,
+    total_input_tokens: row?.total_input ?? 0,
+    total_output_tokens: row?.total_output ?? 0,
+    error_count: row?.error_count ?? 0,
   };
 }
 
