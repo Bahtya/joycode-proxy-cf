@@ -342,11 +342,21 @@ const SettingsPage: React.FC = () => {
                 <SelectValue placeholder={field.placeholder} />
               </SelectTrigger>
               <SelectContent>
-                {(field.options?.length ? field.options : modelOptions).map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </SelectItem>
-                ))}
+                {(() => {
+                  const base = field.options?.length ? field.options : modelOptions;
+                  // Defensive union: keep showing a saved value even if it's no longer
+                  // in the option list so the Select isn't blank. (C2)
+                  const cur = values[field.key];
+                  const extra =
+                    typeof cur === 'string' && cur && !base.some((o) => o.value === cur)
+                      ? [{ label: cur, value: cur }]
+                      : [];
+                  return [...base, ...extra].map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ));
+                })()}
               </SelectContent>
             </Select>
           );

@@ -54,6 +54,11 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { chartColor } from '@/lib/chart';
 
+// Sentinel value for the "unset default model" dropdown option. Radix Select
+// disallows empty-string item values, so unset is represented by this sentinel
+// and mapped back to '' in handleModelChange. (C2/F4)
+const NONE_MODEL = '__none__';
+
 const isClaudeModel = (model?: string) => model === 'Claude-Opus-4.7';
 
 const PIE_COLORS = ['#00b578', '#36cfc9', '#73d13d', '#95de64', '#1890ff', '#13c2c2', '#eb2f96', '#fa8c16'];
@@ -204,8 +209,9 @@ const AccountDetail: React.FC = () => {
   const handleModelChange = async (newModel: string) => {
     setSavingModel(true);
     try {
-      await api.updateAccountModel(decodedKey, newModel);
-      toast.success(`默认模型已更新为「${newModel || '未设置'}」`);
+      const real = newModel === NONE_MODEL ? '' : newModel;
+      await api.updateAccountModel(decodedKey, real);
+      toast.success(`默认模型已更新为「${real || '未设置'}」`);
       fetchData();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '更新失败');
@@ -251,10 +257,16 @@ const AccountDetail: React.FC = () => {
     return <div className="py-24 text-center text-muted-foreground">账号不存在</div>;
   }
 
-  // Model options come from the admin-configured selectable list (/api/models),
-  // not a hardcoded builtin. The proxy still forwards any client-specified model
-  // regardless of this list.
-  const allModelOptions = models.map((m) => ({ label: m.name || m.id, value: m.id }));
+  // Model options come from the admin-configured selectable list (/api/models).
+  // Defensive union: if the account's saved default_model isn't in the list, still
+  // show it (so the Select isn't blank and the value is re-selectable). NONE_MODEL
+  // is the unset sentinel. (C2/F4)
+  const configured = models.map((m) => ({ label: m.name || m.id, value: m.id }));
+  const savedExtra =
+    account.default_model && !configured.some((o) => o.value === account.default_model)
+      ? [{ label: account.default_model, value: account.default_model }]
+      : [];
+  const allModelOptions = [{ label: '未设置', value: NONE_MODEL }, ...configured, ...savedExtra];
 
   const filteredLogs = logFilter === 'all'
     ? logs
@@ -321,7 +333,7 @@ const AccountDetail: React.FC = () => {
               </TooltipContent>
             </Tooltip>
             <Select
-              value={account.default_model || undefined}
+              value={account.default_model || NONE_MODEL}
               onValueChange={handleModelChange}
               disabled={savingModel || modelLoading}
             >

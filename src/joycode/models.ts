@@ -24,25 +24,31 @@ export interface ModelInfo {
 }
 
 /**
- * Built-in model allowlist exposed by the proxy dashboard / defaults.
+ * Request-routing model allowlist used by resolveModel: the client-specified model
+ * must be in this list to pass through, otherwise resolveModel falls back to the
+ * account/system default.
  *
- * Order matters: the first entry is the default model.
- * See pkg/joycode/client.go:26-36.
+ * Synced to the live upstream catalog (verified via /api/saas/models/v1/modelList):
+ * JoyAI-Code-1.5 is the current flagship (replaces the stale 'JoyAI-Code');
+ * Kimi-K2.5 and GLM-4.7 have been retired upstream. Order matters — MODELS[0] is
+ * the final fallback default. (C1)
+ *
+ * NOTE: independent of the admin-configured *display* list (settings.selectable_models
+ * / DEFAULT_SELECTABLE_MODELS below), which only controls which models appear in
+ * dashboard dropdowns, not request routing.
  */
 export const MODELS: readonly string[] = [
-  'JoyAI-Code',
+  'JoyAI-Code-1.5',
   'Claude-Opus-4.7',
   'MiniMax-M2.7',
   'Kimi-K2.6',
-  'Kimi-K2.5',
   'GLM-5.1',
   'GLM-5',
-  'GLM-4.7',
   'Doubao-Seed-2.0-pro',
 ] as const;
 
-/** Default model id (MODELS[0]). Matches pkg/joycode/client.go:19. */
-export const DEFAULT_MODEL = 'JoyAI-Code';
+/** Default model id (MODELS[0]). Matches the current upstream flagship. (C1) */
+export const DEFAULT_MODEL = 'JoyAI-Code-1.5';
 
 /**
  * Default selectable-models seed (high-tier subset) used when the

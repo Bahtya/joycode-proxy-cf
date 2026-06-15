@@ -141,14 +141,12 @@ export const REASONING_MODELS: ReadonlySet<string> = new Set(['GLM-5.1', 'Kimi-K
 
 /** Model capability descriptors. Mirrors ModelCapabilities (types.go:28-38). */
 export const MODEL_CAPABILITIES: Record<string, ModelCapability> = {
-  'JoyAI-Code': { max_tokens: 64000, ctx: 200000 },
+  'JoyAI-Code-1.5': { max_tokens: 64000, ctx: 200000 },
   'Claude-Opus-4.7': { max_tokens: 32000, ctx: 200000 },
   'MiniMax-M2.7': { reasoning: true, max_tokens: 16384, ctx: 200000 },
-  'Kimi-K2.5': { vision: true, max_tokens: 16384, ctx: 200000 },
   'Kimi-K2.6': { vision: true, reasoning: true, max_tokens: 16384, ctx: 200000 },
   'GLM-5.1': { reasoning: true, max_tokens: 16384, ctx: 200000 },
   'GLM-5': { max_tokens: 8192, ctx: 200000 },
-  'GLM-4.7': { max_tokens: 8192, ctx: 200000 },
   'Doubao-Seed-2.0-pro': { max_tokens: 16384, ctx: 200000 },
 };
 
