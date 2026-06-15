@@ -1,0 +1,12 @@
+node_modules/
+web-build/
+web/dist/
+.wrangler/
+.dev.vars
+*.log
+worker-configuration.d.ts
+.DS_Store
+
+# 含账号专属 D1/KV 资源 ID，不入库（用 *.example 模板代替）
+wrangler.toml
+keepalive-worker/wrangler.cron.toml

@@ -1,0 +1,5 @@
+# Copy to .dev.vars and fill in for LOCAL `wrangler pages dev`.
+# (Never commit .dev.vars — it's gitignored.)
+PTKEY_ENC_KEY=
+JWT_SECRET=
+AUTH_PASSWORD_HASH=

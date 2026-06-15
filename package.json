@@ -1,0 +1,31 @@
+{
+  "name": "joycode-proxy-cf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Pages + Functions edge port of JoyCodeProxy (protocol translator → JoyCode).",
+  "scripts": {
+    "types": "wrangler types",
+    "build:web": "cd web && node node_modules/typescript/bin/tsc -b && node node_modules/vite/bin/vite.js build",
+    "dev": "npm run build:web && wrangler pages dev ./web-build --local --compatibility-date 2026-06-01",
+    "pages:dev": "npm run build:web && wrangler pages dev ./web-build --local --compatibility-date 2026-06-01",
+    "pages:deploy": "npm run build:web && wrangler pages deploy ./web-build --project-name joycode-proxy",
+    "cron:dev": "wrangler dev --config keepalive-worker/wrangler.cron.toml --test-scheduled",
+    "cron:deploy": "wrangler deploy --config keepalive-worker/wrangler.cron.toml",
+    "db:migrate:local": "wrangler d1 execute joycode-proxy-db --local --file=migrations/0001_init.sql && wrangler d1 execute joycode-proxy-db --local --file=migrations/0002_keepalive_status.sql",
+    "db:migrate:prod": "wrangler d1 execute joycode-proxy-db --file=migrations/0001_init.sql && wrangler d1 execute joycode-proxy-db --file=migrations/0002_keepalive_status.sql",
+    "db:query:local": "wrangler d1 execute joycode-proxy-db --local",
+    "db:query:prod": "wrangler d1 execute joycode-proxy-db",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250601.0",
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.6.3",
+    "wrangler": "^4.95.0"
+  }
+}
