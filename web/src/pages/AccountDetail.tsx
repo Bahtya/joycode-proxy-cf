@@ -54,18 +54,6 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { chartColor } from '@/lib/chart';
 
-const BUILTIN_MODELS = [
-  { label: 'JoyAI-Code（推荐）', value: 'JoyAI-Code' },
-  { label: 'Claude-Opus-4.7', value: 'Claude-Opus-4.7' },
-  { label: 'GLM-5.1', value: 'GLM-5.1' },
-  { label: 'GLM-5', value: 'GLM-5' },
-  { label: 'GLM-4.7', value: 'GLM-4.7' },
-  { label: 'Kimi-K2.6', value: 'Kimi-K2.6' },
-  { label: 'Kimi-K2.5', value: 'Kimi-K2.5' },
-  { label: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
-  { label: 'Doubao-Seed-2.0-pro', value: 'Doubao-Seed-2.0-pro' },
-];
-
 const isClaudeModel = (model?: string) => model === 'Claude-Opus-4.7';
 
 const PIE_COLORS = ['#00b578', '#36cfc9', '#73d13d', '#95de64', '#1890ff', '#13c2c2', '#eb2f96', '#fa8c16'];
@@ -187,10 +175,10 @@ const AccountDetail: React.FC = () => {
   const fetchModels = async () => {
     setModelLoading(true);
     try {
-      const data = await api.listAccountModels(decodedKey);
+      const data = await api.listModels();
       setModels(data);
     } catch {
-      // fallback to builtin
+      // leave empty on error; dropdown just shows nothing until retry
     } finally {
       setModelLoading(false);
     }
@@ -263,12 +251,10 @@ const AccountDetail: React.FC = () => {
     return <div className="py-24 text-center text-muted-foreground">账号不存在</div>;
   }
 
-  const allModelOptions = [
-    ...BUILTIN_MODELS,
-    ...models
-      .filter((m) => !BUILTIN_MODELS.some((b) => b.value === m.id))
-      .map((m) => ({ label: m.name || m.id, value: m.id })),
-  ];
+  // Model options come from the admin-configured selectable list (/api/models),
+  // not a hardcoded builtin. The proxy still forwards any client-specified model
+  // regardless of this list.
+  const allModelOptions = models.map((m) => ({ label: m.name || m.id, value: m.id }));
 
   const filteredLogs = logFilter === 'all'
     ? logs
@@ -331,7 +317,7 @@ const AccountDetail: React.FC = () => {
                 <span><HelpCircle className="size-4 cursor-help text-muted-foreground" /></span>
               </TooltipTrigger>
               <TooltipContent className="max-w-xs text-left">
-                此模型的用途仅限生成下方的快速启动命令。实际请求中的模型由客户端指定（如 ANTHROPIC_MODEL 环境变量），始终优先于本设置。模型列表来自 JoyCode API 支持的模型 + 服务器动态获取的扩展模型。
+                此模型的用途仅限生成下方的快速启动命令。实际请求中的模型由客户端指定（如 ANTHROPIC_MODEL 环境变量），始终优先于本设置。模型列表来自 Settings「可选模型」配置。
               </TooltipContent>
             </Tooltip>
             <Select

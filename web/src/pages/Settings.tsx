@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 import { api, authApi, clearToken } from '../api';
-import type { Settings } from '../api';
+import type { Settings, ModelInfo } from '../api';
 import { cn } from '../lib/utils';
 
 import {
@@ -50,7 +50,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-type FieldType = 'input' | 'number' | 'select' | 'switch';
+type FieldType = 'input' | 'number' | 'select' | 'switch' | 'models';
 
 interface FieldConfig {
   key: string;
@@ -69,23 +69,20 @@ const FIELD_GROUPS: { title: string; fields: FieldConfig[] }[] = [
     title: '模型配置',
     fields: [
       {
+        key: 'selectable_models',
+        label: '可选模型',
+        tag: '已生效',
+        tooltip: '勾选要在各账号「默认模型」下拉中展示的模型。候选项实时来自上游 JoyCode；Claude-Opus-4.7 为代理侧 Anthropic 虚拟模型，常驻不可取消。仅影响下拉展示，不影响代理实际可转发的模型',
+        placeholder: '',
+        type: 'models',
+      },
+      {
         key: 'default_model',
         label: '默认模型',
         tag: '已生效',
-        tooltip: '当客户端未指定模型，且账号未配置默认模型时使用的 JoyCode 模型',
+        tooltip: '当客户端未指定模型，且账号未配置默认模型时使用的 JoyCode 模型（可选项即上方「可选模型」配置）',
         placeholder: 'JoyAI-Code',
         type: 'select',
-        options: [
-          { label: 'JoyAI-Code — 主力代码模型（推荐）', value: 'JoyAI-Code' },
-          { label: 'Claude-Opus-4.7', value: 'Claude-Opus-4.7' },
-          { label: 'GLM-5.1 — 智谱 GLM 5.1', value: 'GLM-5.1' },
-          { label: 'GLM-5 — 智谱 GLM 5', value: 'GLM-5' },
-          { label: 'GLM-4.7 — 智谱 GLM 4.7', value: 'GLM-4.7' },
-          { label: 'Kimi-K2.6 — Moonshot Kimi K2.6', value: 'Kimi-K2.6' },
-          { label: 'Kimi-K2.5 — Moonshot Kimi K2.5', value: 'Kimi-K2.5' },
-          { label: 'MiniMax-M2.7 — MiniMax M2.7', value: 'MiniMax-M2.7' },
-          { label: 'Doubao-Seed-2.0-pro — 豆包 Seed 2.0 Pro', value: 'Doubao-Seed-2.0-pro' },
-        ],
       },
       {
         key: 'default_max_tokens',
@@ -160,6 +157,13 @@ const SettingsPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [values, setValues] = useState<FormValues>({});
 
+  // Selectable-models editor state (kept out of `values` since it's a list; serialized
+  // to a JSON string only on save).
+  const [selectableModels, setSelectableModels] = useState<string[]>([]);
+  const [upstreamModels, setUpstreamModels] = useState<ModelInfo[]>([]);
+  const [modelOptions, setModelOptions] = useState<{ label: string; value: string }[]>([]);
+  const [customModel, setCustomModel] = useState('');
+
   // password-change state
   const [changePwLoading, setChangePwLoading] = useState(false);
   const [oldPassword, setOldPassword] = useState('');
@@ -174,6 +178,7 @@ const SettingsPage: React.FC = () => {
       // Normalize: switch fields come back as strings from backend; keep native form.
       const next: FormValues = {};
       for (const f of FIELD_GROUPS.flatMap((g) => g.fields)) {
+        if (f.type === 'models') continue; // managed via dedicated list state, not `values`
         const raw = (data as Record<string, unknown>)[f.key];
         if (f.type === 'switch') {
           next[f.key] =
@@ -195,17 +200,40 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  // Load the effective selectable list (/api/models, seed-included) and the live
+  // upstream candidates (/api/upstream-models) for the editor. Claude-Opus-4.7 is
+  // always forced present as a persistent virtual model.
+  const fetchModelConfig = async () => {
+    try {
+      const eff = await api.listModels();
+      const withClaude = eff.some((m) => m.id === 'Claude-Opus-4.7')
+        ? eff
+        : [...eff, { id: 'Claude-Opus-4.7', name: 'Claude-Opus-4.7' }];
+      setSelectableModels(withClaude.map((m) => m.id));
+      setModelOptions(withClaude.map((m) => ({ label: m.name || m.id, value: m.id })));
+    } catch {
+      // ignore — editor still renders Claude
+    }
+    try {
+      setUpstreamModels(await api.listUpstreamModels());
+    } catch {
+      // ignore — candidates optional
+    }
+  };
+
   useEffect(() => {
     void fetchSettings();
+    void fetchModelConfig();
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      // Send the form values as-is (numbers as numbers, booleans as booleans),
-      // preserving the original AntD form submission behavior.
-      await api.updateSettings(values as unknown as Settings);
+      // selectable_models is a JSON string array; other values are scalar.
+      const payload = { ...values, selectable_models: JSON.stringify(selectableModels) };
+      await api.updateSettings(payload as unknown as Settings);
       toast.success('设置已保存');
+      void fetchModelConfig();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '保存设置失败');
     } finally {
@@ -314,7 +342,7 @@ const SettingsPage: React.FC = () => {
                 <SelectValue placeholder={field.placeholder} />
               </SelectTrigger>
               <SelectContent>
-                {field.options?.map((opt) => (
+                {(field.options?.length ? field.options : modelOptions).map((opt) => (
                   <SelectItem key={opt.value} value={opt.value}>
                     {opt.label}
                   </SelectItem>
@@ -336,6 +364,70 @@ const SettingsPage: React.FC = () => {
               </span>
             </div>
           );
+        case 'models': {
+          const CLAUDE = 'Claude-Opus-4.7';
+          const candidateIds = new Set(upstreamModels.map((m) => m.id));
+          const extras = selectableModels.filter((id) => id !== CLAUDE && !candidateIds.has(id));
+          const upstreamRows = upstreamModels.map((m) => ({ id: m.id, label: m.name || m.id, virtual: m.id === CLAUDE }));
+          const extraRows = extras.map((id) => ({ id, label: id, virtual: false }));
+          let rows = [...upstreamRows, ...extraRows];
+          if (!rows.some((r) => r.id === CLAUDE)) rows = [{ id: CLAUDE, label: CLAUDE, virtual: true }, ...rows];
+          const addCustom = () => {
+            const id = customModel.trim();
+            if (!id) return;
+            setCustomModel('');
+            setSelectableModels((prev) => (prev.includes(id) ? prev : [...prev, id]));
+          };
+          return (
+            <div className="space-y-2">
+              <div className="rounded-md border divide-y">
+                {rows.map((r) => {
+                  const checked = selectableModels.includes(r.id);
+                  return (
+                    <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate text-sm font-medium">{r.label}</span>
+                        {r.virtual && (
+                          <span className="text-[11px] text-muted-foreground">Anthropic 虚拟模型 · 常驻</span>
+                        )}
+                      </div>
+                      <Switch
+                        checked={checked}
+                        disabled={r.virtual}
+                        onCheckedChange={(c) =>
+                          setSelectableModels((prev) =>
+                            c ? (prev.includes(r.id) ? prev : [...prev, r.id]) : prev.filter((x) => x !== r.id),
+                          )
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="添加自定义模型 id（上游暂未返回的新模型）"
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addCustom();
+                    }
+                  }}
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addCustom}>
+                  添加
+                </Button>
+              </div>
+              {upstreamModels.length === 0 && (
+                <p className="text-[11px] text-muted-foreground">
+                  未拉到上游候选（可能尚无默认账号）；仍可手动添加模型 id，Claude 常驻可选。
+                </p>
+              )}
+            </div>
+          );
+        }
         default:
           return (
             <Input

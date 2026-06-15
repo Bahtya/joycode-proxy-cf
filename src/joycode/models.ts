@@ -43,3 +43,18 @@ export const MODELS: readonly string[] = [
 
 /** Default model id (MODELS[0]). Matches pkg/joycode/client.go:19. */
 export const DEFAULT_MODEL = 'JoyAI-Code';
+
+/**
+ * Default selectable-models seed (high-tier subset) used when the
+ * `selectable_models` setting is unset. The admin can reconfigure the live list
+ * from the Settings page (picking from upstream candidates); this is only the
+ * out-of-the-box fallback. NOTE: this is a DISPLAY concern only — MODELS above
+ * remains the request-routing allowlist and is intentionally left untouched.
+ */
+export const DEFAULT_SELECTABLE_MODELS: readonly string[] = [
+  'JoyAI-Code-1.5',
+  'Claude-Opus-4.7',
+  'MiniMax-M2.7',
+  'Kimi-K2.6',
+  'GLM-5.1',
+] as const;

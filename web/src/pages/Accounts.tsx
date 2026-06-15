@@ -97,18 +97,6 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { api, accountDisplayName } from '@/api';
 import type { Account } from '@/api';
 
-const BUILTIN_MODELS = [
-  { label: 'JoyAI-Code（推荐）', value: 'JoyAI-Code' },
-  { label: 'Claude-Opus-4.7', value: 'Claude-Opus-4.7' },
-  { label: 'GLM-5.1', value: 'GLM-5.1' },
-  { label: 'GLM-5', value: 'GLM-5' },
-  { label: 'GLM-4.7', value: 'GLM-4.7' },
-  { label: 'Kimi-K2.6', value: 'Kimi-K2.6' },
-  { label: 'Kimi-K2.5', value: 'Kimi-K2.5' },
-  { label: 'MiniMax-M2.7', value: 'MiniMax-M2.7' },
-  { label: 'Doubao-Seed-2.0-pro', value: 'Doubao-Seed-2.0-pro' },
-];
-
 const isClaudeModel = (model?: string) => model === 'Claude-Opus-4.7';
 
 const claudeDockerHint = [
@@ -237,6 +225,7 @@ const Accounts: React.FC = () => {
   const [renameValue, setRenameValue] = useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
+  const [modelOptions, setModelOptions] = useState<{ label: string; value: string }[]>([]);
 
   // AlertDialog confirm states
   const [clearSessionOpen, setClearSessionOpen] = useState(false);
@@ -260,8 +249,18 @@ const Accounts: React.FC = () => {
     }
   };
 
+  const fetchModels = async () => {
+    try {
+      const data = await api.listModels();
+      setModelOptions(data.map((m) => ({ label: m.name || m.id, value: m.id })));
+    } catch {
+      // leave empty on error
+    }
+  };
+
   useEffect(() => {
     fetchAccounts();
+    fetchModels();
   }, []);
 
   const handleAdd = async () => {
@@ -608,7 +607,7 @@ const Accounts: React.FC = () => {
                     <SelectValue placeholder="留空使用系统默认模型" />
                   </SelectTrigger>
                   <SelectContent>
-                    {BUILTIN_MODELS.map((m) => (
+                    {modelOptions.map((m) => (
                       <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
                     ))}
                   </SelectContent>

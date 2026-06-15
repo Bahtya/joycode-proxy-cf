@@ -84,6 +84,7 @@ export const SettingKeys = {
   logRetentionDays: 'log_retention_days',
   enableRequestLogging: 'enable_request_logging',
   enableClaude: 'enable_claude',
+  selectableModels: 'selectable_models',
 } as const;
 
 export type SettingKey = (typeof SettingKeys)[keyof typeof SettingKeys];

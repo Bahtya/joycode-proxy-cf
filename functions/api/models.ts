@@ -1,20 +1,20 @@
-// GET /api/models — list available models.
-// Ports pkg/dashboard/handler.go handleModels.
+// GET /api/models — the admin-configured selectable model list
+// (settings.selectable_models, falling back to DEFAULT_SELECTABLE_MODELS).
 //
-// Go handleModels ALWAYS returns the hardcoded joycode.Models list as {id,name}
-// pairs (it never calls the upstream for /api/models). We match that exactly.
-// (The per-account live model fetch is a separate endpoint, /api/accounts/:id/models,
-//  not part of this module.)
+// This is the single source for all dashboard model dropdowns. It is a DISPLAY
+// concern only — the request-routing allowlist (resolveModel) still uses the
+// static MODELS catalog and is intentionally NOT coupled to this setting.
 // Response shape (frontend web/src/api.ts listModels): { models: { id, name }[] }.
 import type { Env } from '../../src/types';
-import { MODELS } from '../../src/joycode/models';
+import { getModelList } from '../../src/store/settings';
 
 interface DashboardModel {
   id: string;
   name: string;
 }
 
-export const onRequestGet: PagesFunction<Env> = async () => {
-  const models: DashboardModel[] = MODELS.map((m) => ({ id: m, name: m }));
+export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
+  const ids = await getModelList(env.DB);
+  const models: DashboardModel[] = ids.map((id) => ({ id, name: id }));
   return Response.json({ models });
 };
