@@ -11,6 +11,8 @@
 // TranslateStreamChunk is dead code in the live path. The CF port does the same
 // verbatim pipe — see functions/v1/chat/completions.ts.
 
+import { DEFAULT_MODEL } from '../joycode/models';
+
 /** A permissive OpenAI Chat Completions request shape (translate.go:9-19). */
 export interface OpenAIChatRequest {
   model: string;
@@ -173,7 +175,7 @@ export function resolveModel(
   if (knownModels.includes(model)) return model;
   if (accountDefault) return accountDefault;
   if (systemDefault) return systemDefault;
-  return knownModels[0] ?? 'JoyAI-Code';
+  return knownModels[0] ?? DEFAULT_MODEL;
 }
 
 /** Opaque short id for completion/fingerprint envelopes. Mirrors newShortID (translate.go:99-101). */

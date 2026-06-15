@@ -3,19 +3,6 @@
 import type { Env } from '../types';
 import { createJoyClient } from '../joycode/client';
 
-/** Hardcoded fallback model list (joycode/client.go:26). */
-export const FALLBACK_MODELS = [
-  'JoyAI-Code',
-  'Claude-Opus-4.7',
-  'MiniMax-M2.7',
-  'Kimi-K2.6',
-  'Kimi-K2.5',
-  'GLM-5.1',
-  'GLM-5',
-  'GLM-4.7',
-  'Doubao-Seed-2.0-pro',
-];
-
 export function clientFor(env: Env, account: { ptKey: string; userId: string }) {
   return createJoyClient({
     ptKey: account.ptKey,

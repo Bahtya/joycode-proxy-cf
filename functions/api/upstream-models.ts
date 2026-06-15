@@ -5,6 +5,7 @@
 // The upstream catalog rarely changes, so the result is cached in the settings
 // table (underscore-prefixed keys, hidden from GET /api/settings) for ~1h and
 // served stale on subsequent opens / on upstream failure. (P4)
+// Companion endpoint: GET /api/models returns the admin-configured selectable list.
 import type { Env } from '../../src/types';
 import { createStore } from '../../src/store/d1';
 import { clientFor } from '../../src/dashboard/account-views';

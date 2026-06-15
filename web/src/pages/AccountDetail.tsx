@@ -151,7 +151,10 @@ const AccountDetail: React.FC = () => {
   const [renewing, setRenewing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [logFilter, setLogFilter] = useState<string>('all');
-  const [activeSessions, setActiveSessions] = useState(0);
+  // active_sessions is always 0 on the edge port (no in-memory session tracker), so
+  // this is a constant — the previous 5s listAccounts() poll that set it was
+  // non-functional and wasteful. (P3)
+  const activeSessions = 0;
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const pageSize = 20;

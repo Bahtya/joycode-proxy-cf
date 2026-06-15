@@ -88,12 +88,13 @@ export function resolveModel(
   model: string | undefined,
   accountDefault: string,
   systemDefault: string,
+  knownModels: readonly string[] = MODELS,
 ): string {
   const m = model ?? '';
-  if (MODELS.includes(m)) return m;
+  if (knownModels.includes(m)) return m;
   if (accountDefault !== '') return accountDefault;
   if (systemDefault !== '') return systemDefault;
-  return DEFAULT_MODEL;
+  return knownModels[0] ?? DEFAULT_MODEL;
 }
 
 // ---------------------------------------------------------------------------

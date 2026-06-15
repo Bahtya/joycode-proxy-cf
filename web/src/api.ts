@@ -184,8 +184,6 @@ export const api = {
     request<{ valid: boolean }>(`/api/accounts/${encodeURIComponent(userId)}/validate`, { method: 'POST' }),
   listModels: () => request<{ models: ModelInfo[] }>('/api/models').then(r => r.models),
   listUpstreamModels: () => request<{ models: ModelInfo[] }>('/api/upstream-models').then(r => r.models),
-  listAccountModels: (userId: string) =>
-    request<{ models: ModelInfo[] }>(`/api/accounts/${encodeURIComponent(userId)}/models`).then(r => r.models),
   getStats: () => request<Stats>('/api/stats'),
   getSettings: () => request<{ settings: Settings }>('/api/settings').then(r => r.settings),
   updateSettings: (data: Settings) =>
