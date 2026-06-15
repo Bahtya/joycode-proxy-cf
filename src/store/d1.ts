@@ -79,10 +79,10 @@ export class Store {
   }): Promise<Account> {
     const ptCipher = await encrypt(a.ptKey, this.encKey);
     const isDefault = a.isDefault ? 1 : 0;
-    // Match Go store.go:592 — always provision an api_token (sk-joy-<32hex>) when the
+    // Match Go store.go:592 — always provision an api_token (sk-<32hex>) when the
     // caller didn't supply one, so every account has a usable proxy key.
     const apiToken =
-      a.apiToken && a.apiToken.trim() !== '' ? a.apiToken : 'sk-joy-' + hexId(16);
+      a.apiToken && a.apiToken.trim() !== '' ? a.apiToken : 'sk-' + hexId(16);
     if (isDefault) await this.db.prepare('UPDATE accounts SET is_default = 0').run();
     await this.db
       .prepare(

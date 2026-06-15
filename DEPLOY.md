@@ -128,7 +128,7 @@ curl -s https://joycode-proxy.pages.dev/health
 3. 复制账号的 **API Token**，配到 Claude Code：
    ```bash
    export ANTHROPIC_BASE_URL=https://<你的>.pages.dev
-   export ANTHROPIC_API_KEY=<API Token>     # 即上面的 api_token（sk-joy-...）
+   export ANTHROPIC_API_KEY=<API Token>     # 即上面的 api_token（sk-...）
    ```
 
 ## 密钥 / 绑定一览

@@ -245,6 +245,7 @@ export async function qrPoll(env: Env, sessionId: string): Promise<QRPollStatus>
 
   const bodyText = await checkRes.text();
   const check = parseJsonp<CheckResult>(bodyText);
+  console.log('[qr] check: http=', checkRes.status, 'code=', check?.code, 'bodyHead=', bodyText.slice(0, 200));
   if (!check || typeof check.code !== 'number') {
     // jdlogin.go:137-140 / 146-149 — not JSONP or parse failed → waiting.
     await writeSession(env, session);
@@ -337,6 +338,7 @@ async function validateAndFetchInfo(
   });
   // The redirect chain sets pt_key on the jar.
   session.cookies = mergeSetCookies(session.cookies, validRes);
+  console.log('[qr] validate: http=', validRes.status, 'finalUrl=', validRes.url, 'cookies=', Object.keys(session.cookies), 'pt_key?', !!session.cookies['pt_key']);
 
   let ptKey = session.cookies['pt_key'] ?? '';
   let ptPin = session.cookies['pt_pin'] ?? '';
@@ -348,6 +350,7 @@ async function validateAndFetchInfo(
 
   // Step 2: parse JSON body for returnCode/riskCode/url (jdlogin.go:262-282).
   const bodyText = await validRes.text();
+  console.log('[qr] validate bodyHead=', bodyText.slice(0, 300));
   let parsed: { returnCode?: number; riskCode?: number; url?: string } | null = null;
   try {
     parsed = JSON.parse(bodyText) as { returnCode?: number; riskCode?: number; url?: string };
@@ -388,6 +391,7 @@ async function validateAndFetchInfo(
 
   // Step 4: final check (jdlogin.go:305-312).
   if (!ptKey) {
+    console.log('[qr] FAILED: pt_key not found after full validation chain');
     throw new Error('pt_key cookie not found after validation');
   }
 
@@ -418,6 +422,7 @@ async function buildLoginResult(env: Env, ptKey: string, ptPin: string): Promise
     throw new Error('userInfo request failed: ' + (e instanceof Error ? e.message : String(e)));
   }
 
+  console.log('[qr] userInfo: code=', info?.code, 'hasData=', !!info?.data);
   const code = info?.code;
   if (typeof code !== 'number' || code !== 0) {
     const msg = (info && typeof info.msg === 'string' && info.msg) || 'unknown error';

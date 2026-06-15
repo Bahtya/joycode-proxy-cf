@@ -25,6 +25,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const result = await qrPoll(env, sessionId);
+  console.log('[qr-status] session=', sessionId.slice(0, 12), 'result=', JSON.stringify(result));
 
   // Non-success states pass straight through (handler.go:950-956).
   if (result.status !== 'success') {

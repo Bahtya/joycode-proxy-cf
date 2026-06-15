@@ -269,18 +269,14 @@ const Accounts: React.FC = () => {
       toast.error('请输入 ptKey');
       return;
     }
-    if (!form.user_id) {
-      toast.error('请输入用户 ID');
-      return;
-    }
     try {
-      await api.addAccount({
+      const res = await api.addAccount({
         pt_key: form.pt_key,
-        user_id: form.user_id,
+        user_id: form.user_id || undefined,
         is_default: form.is_default,
         default_model: form.default_model || undefined,
       });
-      toast.success(`账号「${form.user_id}」添加成功`);
+      toast.success(`账号「${res.nickname || res.user_id}」添加成功`);
       setModalOpen(false);
       setForm({ pt_key: '', user_id: '', default_model: '', is_default: false });
       fetchAccounts();
@@ -575,18 +571,18 @@ const Accounts: React.FC = () => {
 
               <div className="flex flex-col gap-2">
                 <Label>
-                  JoyCode 用户 ID
+                  用户 ID（可选）
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
-                      与 ptKey 对应的用户 ID。获取方式：打开 JoyCode 桌面客户端 → 设置 → 个人信息 → 复制用户 ID
+                      留空则用 ptKey 自动获取（推荐）。仅在你需要手动指定用户 ID 时填写。
                     </TooltipContent>
                   </Tooltip>
                 </Label>
                 <Input
-                  placeholder="例如：user-12345 或从 JoyCode 客户端复制"
+                  placeholder="留空自动获取"
                   value={form.user_id}
                   onChange={(e) => setForm((f) => ({ ...f, user_id: e.target.value }))}
                 />

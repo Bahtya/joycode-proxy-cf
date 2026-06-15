@@ -174,8 +174,8 @@ export const authApi = {
 
 export const api = {
   listAccounts: () => request<{ accounts: Account[] }>('/api/accounts').then(r => r.accounts),
-  addAccount: (data: { user_id: string; pt_key: string; nickname?: string; is_default?: boolean; default_model?: string }) =>
-    request<{ ok: boolean }>('/api/accounts', { method: 'POST', body: JSON.stringify(data) }),
+  addAccount: (data: { pt_key: string; user_id?: string; nickname?: string; is_default?: boolean; default_model?: string }) =>
+    request<{ ok: boolean; user_id: string; nickname: string }>('/api/accounts', { method: 'POST', body: JSON.stringify(data) }),
   removeAccount: (userId: string) =>
     request<{ ok: boolean }>(`/api/accounts/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
   setDefault: (userId: string) =>

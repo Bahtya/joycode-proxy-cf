@@ -7,7 +7,6 @@ import type { Env, Account } from '../../../src/types';
 import { createStore } from '../../../src/store/d1';
 import { createJoyClient } from '../../../src/joycode/client';
 import { readJson, jsonError, notFound } from '../../../src/util/http';
-import { hexId } from '../../../src/util/id';
 
 /** The dashboard AccountInfo shape the frontend expects (mirrors store.go:48-66). */
 interface AccountInfo {
@@ -186,7 +185,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     userId,
     nickname,
     remark,
-    apiToken: apiToken || hexId(16),
+    apiToken,
     ptKey,
     isDefault,
     defaultModel,
