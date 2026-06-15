@@ -5,25 +5,33 @@
 // browser navigation, serve the SPA index.html and let React Router take over.
 import type { Env } from '../src/types';
 
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Max-Age': '86400',
-};
+// CORS: the dashboard SPA is same-origin and API clients (Claude Code/Cursor) are
+// non-browser, so a wildcard origin is unnecessary and overly permissive. Reflect
+// the service's own origin and pin the allowed header set. (S4)
+const ALLOWED_HEADERS = 'Authorization, X-Api-Key, Content-Type';
+const ALLOWED_METHODS = 'GET, POST, PUT, DELETE, OPTIONS';
+
+function corsHeaders(request: Request): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': new URL(request.url).origin,
+    'Access-Control-Allow-Headers': ALLOWED_HEADERS,
+    'Access-Control-Allow-Methods': ALLOWED_METHODS,
+    'Access-Control-Max-Age': '86400',
+  };
+}
 
 function acceptsHtml(request: Request): boolean {
   return (request.headers.get('accept') ?? '').includes('text/html');
 }
 
-function withCors(res: Response): Response {
-  for (const [k, v] of Object.entries(CORS_HEADERS)) res.headers.set(k, v);
+function withCors(res: Response, request: Request): Response {
+  for (const [k, v] of Object.entries(corsHeaders(request))) res.headers.set(k, v);
   return res;
 }
 
 export const onRequest: PagesFunction<Env> = async ({ request, next, env }) => {
   if (request.method === 'OPTIONS') {
-    return new Response(null, { headers: CORS_HEADERS });
+    return new Response(null, { headers: corsHeaders(request) });
   }
   try {
     const res = await next();
@@ -44,17 +52,17 @@ export const onRequest: PagesFunction<Env> = async ({ request, next, env }) => {
           })
         );
         if (indexRes.ok) {
-          return withCors(new Response(indexRes.body, { status: 200, headers: indexRes.headers }));
+          return withCors(new Response(indexRes.body, { status: 200, headers: indexRes.headers }), request);
         }
       } catch {
         /* fall through to the 404 */
       }
     }
-    return withCors(res);
+    return withCors(res, request);
   } catch (err) {
     return Response.json(
       { type: 'error', error: { type: 'internal_error', message: err instanceof Error ? err.message : String(err) } },
-      { status: 500, headers: CORS_HEADERS }
+      { status: 500, headers: corsHeaders(request) }
     );
   }
 };

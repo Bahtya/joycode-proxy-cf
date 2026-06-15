@@ -23,14 +23,34 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
     return Response.json({ detail: 'invalid JSON body' }, { status: 400 });
   }
 
-  // Update each provided key. Values are coerced to string (Go stored TEXT).
-  // Refuse to overwrite auth secrets from this endpoint (defence-in-depth);
-  // those are managed by the auth handlers.
-  const FORBIDDEN = new Set(['auth_jwt_secret', 'auth_password_hash']);
+  // Update each provided key. Allowlist (not denylist): only known writable keys are
+  // accepted; auth secrets are managed by the auth handlers and never writable here.
+  const ALLOWED = new Set([
+    'default_model',
+    'default_max_tokens',
+    'max_retries',
+    'request_timeout',
+    'max_connections',
+    'enable_request_logging',
+    'log_retention_days',
+    'selectable_models',
+  ]);
   const stmts: D1PreparedStatement[] = [];
   for (const [key, value] of Object.entries(body)) {
-    if (FORBIDDEN.has(key)) continue;
-    const strVal = value == null ? '' : String(value);
+    if (!ALLOWED.has(key)) continue;
+    let strVal = value == null ? '' : String(value);
+    if (key === 'selectable_models') {
+      // Validate it round-trips as a JSON string array (defence-in-depth; getModelList
+      // also validates on read, but reject early with a clear error here).
+      try {
+        const parsed: unknown = JSON.parse(strVal);
+        if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === 'string')) {
+          return Response.json({ detail: 'selectable_models must be a JSON string array' }, { status: 400 });
+        }
+      } catch {
+        return Response.json({ detail: 'selectable_models must be valid JSON' }, { status: 400 });
+      }
+    }
     stmts.push(
       env.DB
         .prepare(

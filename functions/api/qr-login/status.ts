@@ -25,7 +25,9 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   }
 
   const result = await qrPoll(env, sessionId);
-  console.log('[qr-status] session=', sessionId.slice(0, 12), 'result=', JSON.stringify(result));
+  // Log only safe fields — never JSON.stringify(result), which on success contains
+  // the freshly captured pt_key (a credential). (S1)
+  console.log('[qr-status] session=', sessionId.slice(0, 12), 'status=', result.status);
 
   // Non-success states pass straight through (handler.go:950-956).
   if (result.status !== 'success') {

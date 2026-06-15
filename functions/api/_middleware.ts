@@ -54,10 +54,13 @@ export const onRequest: PagesFunction<Env> = async ({ request, env, data, next }
     return next();
   }
 
-  // (3) Auth disabled until a password hash exists (open-setup window).
+  // (3) Auth disabled until a password hash exists (open-setup window). Only the
+  // whitelisted setup/auth paths (already passed the check above) are reachable
+  // without a password; everything else is locked until /api/auth/setup completes.
+  // (S5 — previously the entire /api/* subtree was unauthenticated here.)
   const hash = await getSetting(env.DB, SettingKeys.authPasswordHash);
   if (!hash) {
-    return next();
+    return Response.json({ detail: 'service not initialized' }, { status: 503 });
   }
 
   // (4) Extract token: Bearer header first, then cookie fallback.
