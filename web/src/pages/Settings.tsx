@@ -204,21 +204,35 @@ const SettingsPage: React.FC = () => {
   // upstream candidates (/api/upstream-models) for the editor. Claude-Opus-4.7 is
   // always forced present as a persistent virtual model.
   const fetchModelConfig = async () => {
+    let eff: ModelInfo[] = [];
+    let ups: ModelInfo[] = [];
     try {
-      const eff = await api.listModels();
-      const withClaude = eff.some((m) => m.id === 'Claude-Opus-4.7')
-        ? eff
-        : [...eff, { id: 'Claude-Opus-4.7', name: 'Claude-Opus-4.7' }];
-      setSelectableModels(withClaude.map((m) => m.id));
-      setModelOptions(withClaude.map((m) => ({ label: m.name || m.id, value: m.id })));
+      eff = await api.listModels();
     } catch {
-      // ignore — editor still renders Claude
+      toast.error('模型列表加载失败，可重试'); // (F3)
     }
     try {
-      setUpstreamModels(await api.listUpstreamModels());
+      ups = await api.listUpstreamModels();
+      setUpstreamModels(ups);
     } catch {
-      // ignore — candidates optional
+      // upstream candidates optional — editor still works with eff + Claude
     }
+    // Enrich the default_model dropdown labels with upstream names (F2): /api/models
+    // returns name=id, so prefer the upstream label when available.
+    const labelMap = new Map(ups.map((m) => [m.id, m.name || m.id]));
+    const withClaude = eff.some((m) => m.id === 'Claude-Opus-4.7')
+      ? eff
+      : [...eff, { id: 'Claude-Opus-4.7', name: 'Claude-Opus-4.7' }];
+    setSelectableModels(withClaude.map((m) => m.id));
+    setModelOptions(withClaude.map((m) => ({ label: labelMap.get(m.id) || m.name || m.id, value: m.id })));
+  };
+
+  // Refresh both scalar setting values and the model-editor state (used by the banner
+  // 刷新 and 恢复当前值 buttons so the editor resets too). (F1)
+  const refreshAll = () => {
+    void fetchSettings();
+    void fetchModelConfig();
+    setCustomModel('');
   };
 
   useEffect(() => {
@@ -386,7 +400,11 @@ const SettingsPage: React.FC = () => {
             const id = customModel.trim();
             if (!id) return;
             setCustomModel('');
-            setSelectableModels((prev) => (prev.includes(id) ? prev : [...prev, id]));
+            if (selectableModels.includes(id)) {
+              toast.info('该模型已存在'); // (F6)
+              return;
+            }
+            setSelectableModels((prev) => [...prev, id]);
           };
           return (
             <div className="space-y-2">
@@ -481,7 +499,7 @@ const SettingsPage: React.FC = () => {
           </div>
           <Button
             variant="ghost"
-            onClick={() => void fetchSettings()}
+            onClick={refreshAll}
             className="text-white hover:bg-white/10 hover:text-white"
           >
             <RotateCcw className="size-4" />
@@ -569,7 +587,7 @@ const SettingsPage: React.FC = () => {
         <Button
           variant="outline"
           size="lg"
-          onClick={() => void fetchSettings()}
+          onClick={refreshAll}
         >
           <RotateCcw className="size-4" />
           恢复当前值

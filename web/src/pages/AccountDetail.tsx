@@ -183,7 +183,7 @@ const AccountDetail: React.FC = () => {
       const data = await api.listModels();
       setModels(data);
     } catch {
-      // leave empty on error; dropdown just shows nothing until retry
+      toast.error('模型列表加载失败'); // (F5)
     } finally {
       setModelLoading(false);
     }
