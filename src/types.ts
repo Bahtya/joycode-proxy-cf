@@ -11,7 +11,6 @@ export interface Env {
   JOYCODE_CLIENT_VERSION: string;
   MAX_ACCOUNTS: string;
   DEFAULT_TIMEOUT: string;
-  LOG_RETENTION_DAYS: string;
 
   // secrets
   PTKEY_ENC_KEY: string; // 64-char hex (32-byte AES-256-GCM key)

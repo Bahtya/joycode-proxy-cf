@@ -2,6 +2,7 @@
 // Kept out of the route files so each route is a thin PagesFunction.
 import type { Env } from '../types';
 import { createJoyClient } from '../joycode/client';
+import { getAllTimeTotals } from '../store/dashboard';
 
 export function clientFor(env: Env, account: { ptKey: string; userId: string }) {
   return createJoyClient({
@@ -49,17 +50,10 @@ export async function accountStatsResponse(env: Env, userId: string): Promise<Re
     .bind(userId)
     .all<{ endpoint: string; count: number }>();
 
-  const allTime = await db
-    .prepare(
-      `SELECT
-         COUNT(*) AS total_requests,
-         COALESCE(SUM(input_tokens), 0) AS total_input_tokens,
-         COALESCE(SUM(output_tokens), 0) AS total_output_tokens,
-         SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count
-       FROM request_logs WHERE api_key = ?`
-    )
-    .bind(userId)
-    .first<Record<string, number>>();
+  // all_time = rolled-up stats_daily + live-window raw (disjoint; see
+  // getAllTimeTotals). Replaces an unscoped scan of request_logs that would
+  // under-count once old raw days are rolled up + deleted.
+  const allTime = await getAllTimeTotals(db, userId);
 
   const hourly = await db
     .prepare(

@@ -5,6 +5,7 @@
 // JWT-gated by functions/api/_middleware.ts (auth is done before we run).
 import type { Env, Account } from '../../../src/types';
 import { createStore } from '../../../src/store/d1';
+import { getAllTimeTotals } from '../../../src/store/dashboard';
 import { createJoyClient } from '../../../src/joycode/client';
 import { readJson, jsonError, notFound } from '../../../src/util/http';
 
@@ -37,14 +38,11 @@ interface AccountInfo {
  */
 async function toAccountInfo(db: D1Database, a: Account): Promise<AccountInfo> {
   const key = a.userId;
-  const [allRow, todayRow] = await Promise.all([
-    db
-      .prepare(
-        `SELECT COUNT(*) AS req, COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
-         FROM request_logs WHERE api_key = ?`
-      )
-      .bind(key)
-      .first<{ req: number; tokens: number }>(),
+  // all-time = rolled-up stats_daily + live-window raw (disjoint; see
+  // getAllTimeTotals) — replaces an unscoped request_logs scan that would
+  // under-count once old raw days are rolled up + deleted. today stays raw.
+  const [allTotals, todayRow] = await Promise.all([
+    getAllTimeTotals(db, key),
     db
       .prepare(
         `SELECT COUNT(*) AS req, COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
@@ -65,9 +63,9 @@ async function toAccountInfo(db: D1Database, a: Account): Promise<AccountInfo> {
     created_at: a.createdAt,
     display_order: a.displayOrder,
     active_sessions: 0, // no in-memory session tracker on the edge (proxy.GetActiveSessions is local-only)
-    total_requests: allRow?.req ?? 0,
+    total_requests: allTotals.total_requests,
     today_requests: todayRow?.req ?? 0,
-    total_tokens: allRow?.tokens ?? 0,
+    total_tokens: allTotals.total_input_tokens + allTotals.total_output_tokens,
     today_tokens: todayRow?.tokens ?? 0,
     credential_valid: a.credentialValid,
     credential_checked_at: a.credentialRefreshedAt,

@@ -12,8 +12,8 @@
     "pages:deploy": "npm run build:web && wrangler pages deploy ./web-build --project-name joycode-proxy",
     "cron:dev": "wrangler dev --config keepalive-worker/wrangler.cron.toml --test-scheduled",
     "cron:deploy": "wrangler deploy --config keepalive-worker/wrangler.cron.toml",
-    "db:migrate:local": "wrangler d1 execute joycode-proxy-db --local --file=migrations/0001_init.sql && wrangler d1 execute joycode-proxy-db --local --file=migrations/0002_keepalive_status.sql",
-    "db:migrate:prod": "wrangler d1 execute joycode-proxy-db --file=migrations/0001_init.sql && wrangler d1 execute joycode-proxy-db --file=migrations/0002_keepalive_status.sql",
+    "db:migrate:local": "wrangler d1 execute joycode-proxy-db --local --file=migrations/0001_init.sql && wrangler d1 execute joycode-proxy-db --local --file=migrations/0002_keepalive_status.sql && wrangler d1 execute joycode-proxy-db --local --file=migrations/0003_errors_index.sql && wrangler d1 execute joycode-proxy-db --local --file=migrations/0004_stats_daily.sql",
+    "db:migrate:prod": "wrangler d1 execute joycode-proxy-db --file=migrations/0001_init.sql && wrangler d1 execute joycode-proxy-db --file=migrations/0002_keepalive_status.sql && wrangler d1 execute joycode-proxy-db --file=migrations/0003_errors_index.sql && wrangler d1 execute joycode-proxy-db --file=migrations/0004_stats_daily.sql",
     "db:query:local": "wrangler d1 execute joycode-proxy-db --local",
     "db:query:prod": "wrangler d1 execute joycode-proxy-db",
     "check": "tsc --noEmit"

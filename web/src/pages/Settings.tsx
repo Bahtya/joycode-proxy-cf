@@ -138,7 +138,7 @@ const FIELD_GROUPS: { title: string; fields: FieldConfig[] }[] = [
       {
         key: 'log_retention_days',
         label: '日志保留天数',
-        tooltip: '请求日志的自动清理周期。超过此天数的日志将每小时自动清理，0 表示永久保留',
+        tooltip: '聚合统计的保留天数。逐条明细约 7 天后压缩归档为每日汇总；超过此天数的汇总将被定期清理，0 表示永久保留',
         placeholder: '30',
         type: 'number',
         suffix: '天',

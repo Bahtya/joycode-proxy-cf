@@ -210,23 +210,43 @@ export async function getStats(
 }
 
 /** All-time totals (store.GetAllTimeTotals), optionally scoped to one account.
- *  Single conditional-aggregation query (was 4 sequential scans). (P1) */
+ *
+ *  Computed as rolled-up history (stats_daily) + live-window raw (request_logs).
+ *  The two are disjoint — rollupLogs deletes a day's raw rows after aggregating
+ *  them into stats_daily — so summing both never double-counts, and reading the
+ *  rollup avoids scanning the full raw table (O(days×accounts×models) vs O(rows)).
+ *  Used by the global dashboard all_time AND per-account all_time. */
 export async function getAllTimeTotals(db: D1Database, userId?: string): Promise<AllTimeTotals> {
   const scope = userId ? `WHERE api_key = ?` : '';
-  const sql = `SELECT
-      COUNT(*) AS total_requests,
-      COALESCE(SUM(input_tokens), 0) AS total_input,
-      COALESCE(SUM(output_tokens), 0) AS total_output,
-      SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count
-    FROM request_logs ${scope}`;
-  const row = await (userId ? db.prepare(sql).bind(userId) : db.prepare(sql)).first<{
-    total_requests: number; total_input: number; total_output: number; error_count: number;
-  }>();
+  const bind = (s: D1PreparedStatement): D1PreparedStatement => (userId ? s.bind(userId) : s);
+  type Row = { total_requests: number; total_input: number; total_output: number; error_count: number };
+  const [rolled, recent] = await Promise.all([
+    bind(
+      db.prepare(
+        `SELECT
+           COALESCE(SUM(request_count), 0) AS total_requests,
+           COALESCE(SUM(input_tokens), 0) AS total_input,
+           COALESCE(SUM(output_tokens), 0) AS total_output,
+           COALESCE(SUM(error_count), 0) AS error_count
+         FROM stats_daily ${scope}`
+      )
+    ).first<Row>(),
+    bind(
+      db.prepare(
+        `SELECT
+           COUNT(*) AS total_requests,
+           COALESCE(SUM(input_tokens), 0) AS total_input,
+           COALESCE(SUM(output_tokens), 0) AS total_output,
+           SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count
+         FROM request_logs ${scope}`
+      )
+    ).first<Row>(),
+  ]);
   return {
-    total_requests: row?.total_requests ?? 0,
-    total_input_tokens: row?.total_input ?? 0,
-    total_output_tokens: row?.total_output ?? 0,
-    error_count: row?.error_count ?? 0,
+    total_requests: (rolled?.total_requests ?? 0) + (recent?.total_requests ?? 0),
+    total_input_tokens: (rolled?.total_input ?? 0) + (recent?.total_input ?? 0),
+    total_output_tokens: (rolled?.total_output ?? 0) + (recent?.total_output ?? 0),
+    error_count: (rolled?.error_count ?? 0) + (recent?.error_count ?? 0),
   };
 }
 

@@ -11,15 +11,17 @@
 //     bump refreshed_at. On failure mark the credential invalid.
 //
 // The cron wrangler config only binds DB + PTKEY_ENC_KEY + JOYCODE_BASE_URL +
-// JOYCODE_CLIENT_VERSION (+ optional LOG_RETENTION_DAYS). It does NOT bind
-// QR_SESSIONS / ASSETS / JWT_SECRET, so we use a narrow local CronEnv type
-// instead of the full Env (which would require bindings the cron lacks).
+// JOYCODE_CLIENT_VERSION. It does NOT bind QR_SESSIONS / ASSETS / JWT_SECRET, so
+// we use a narrow local CronEnv type instead of the full Env (which would
+// require bindings the cron lacks). Log retention is read from the D1 settings
+// table (set via the dashboard), not an env var.
 //
 // Workers runtime notes: app code runs on the Workers runtime here, so
 // new Date() and setTimeout are both available and used as in the Go original.
 
-import { createStore } from '../../src/store/d1';
+import { createStore, RAW_LIVE_WINDOW_DAYS } from '../../src/store/d1';
 import { createJoyClient } from '../../src/joycode/client';
+import { getIntSetting } from '../../src/store/settings';
 
 /**
  * Bindings available to the cron Worker. Intentionally narrower than the full
@@ -31,7 +33,6 @@ type CronEnv = {
   PTKEY_ENC_KEY: string;
   JOYCODE_BASE_URL: string;
   JOYCODE_CLIENT_VERSION: string;
-  LOG_RETENTION_DAYS?: string;
 };
 
 /** Milliseconds to wait between accounts, matching Go's 5s sleep (keepalive.go:133). */
@@ -107,9 +108,14 @@ async function runKeepalive(env: CronEnv): Promise<void> {
     }
   }
 
-  // Finally, trim old request logs. Falls back to 30 days if unset.
-  const retentionDays = parseInt(env.LOG_RETENTION_DAYS ?? '30', 10);
-  await store.cleanupOldLogs(Number.isFinite(retentionDays) && retentionDays > 0 ? retentionDays : 30);
+  // Roll raw request_logs older than the live window into stats_daily (deleting
+  // the rolled raw rows), then prune old stats_daily + any stray old raw.
+  // Retention reads the admin setting (log_retention_days); previously this used
+  // a vestigial, never-bound env var that always defaulted to 30, so the
+  // dashboard's retention field had no effect.
+  await store.rollupLogs(RAW_LIVE_WINDOW_DAYS);
+  const retentionDays = await getIntSetting(env.DB, 'log_retention_days', 30);
+  await store.cleanupOldLogs(retentionDays > 0 ? retentionDays : 30);
 }
 
 export default {
