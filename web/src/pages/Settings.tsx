@@ -440,7 +440,7 @@ const SettingsPage: React.FC = () => {
               </div>
               {upstreamModels.length === 0 && (
                 <p className="text-[11px] text-muted-foreground">
-                  未拉到上游候选（可能尚无默认账号）；仍可手动添加模型 id，Claude 常驻可选。
+                  未拉到上游候选（可能尚无默认账号）；仍可手动添加模型 id。
                 </p>
               )}
             </div>

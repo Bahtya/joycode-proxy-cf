@@ -23,7 +23,7 @@ import { createJoyClient } from '../../src/joycode/client';
 
 /**
  * Bindings available to the cron Worker. Intentionally narrower than the full
- * Env (no QR_SESSIONS / ASSETS / JWT_SECRET / JOYCODE_SAAS_BASE_URL) — those are
+ * Env (no QR_SESSIONS / ASSETS / JWT_SECRET) — those are
  * not bound in wrangler.cron.toml and assuming them would break type checking.
  */
 type CronEnv = {

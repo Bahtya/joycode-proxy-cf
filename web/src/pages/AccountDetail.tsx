@@ -391,7 +391,6 @@ const AccountDetail: React.FC = () => {
           </div>
         </div>
 
-
         {/* Quick start commands */}
         <Card>
           <CardHeader>

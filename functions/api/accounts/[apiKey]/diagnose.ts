@@ -4,9 +4,8 @@
 // account modal. Runs three timed steps — credential (userInfo), model list, and a
 // minimal real upstream chat probe (max_tokens:1) — each in its own try/catch, and
 // returns a structured result the frontend renders and can copy as a diagnostic
-// blob. The credential step also persists credential_valid + credential_refreshed_at
-// (a superset of POST /validate). Uses a short 15s timeout so a stuck probe doesn't
-// hang the UI (clientFor uses DEFAULT_TIMEOUT=1800).
+// blob. The credential step also persists credential_valid + credential_refreshed_at.
+// Uses a short 15s timeout so a stuck probe doesn't hang the UI.
 import type { Env } from '../../../../src/types';
 import { createStore } from '../../../../src/store/d1';
 import { createJoyClient } from '../../../../src/joycode/client';
@@ -41,7 +40,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, params }) => {
 
   const steps: DiagStep[] = [];
 
-  // 1) Credential — call userInfo() directly (not validate()) to retain code/msg on failure.
+  // 1) Credential — call userInfo() directly to retain code/msg on failure.
   const t0 = Date.now();
   let credOk = false;
   const credFields: Record<string, unknown> = {};

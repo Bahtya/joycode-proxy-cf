@@ -8,7 +8,6 @@ export interface Env {
 
   // [vars]
   JOYCODE_BASE_URL: string;
-  JOYCODE_SAAS_BASE_URL: string;
   JOYCODE_CLIENT_VERSION: string;
   MAX_ACCOUNTS: string;
   DEFAULT_TIMEOUT: string;
