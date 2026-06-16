@@ -560,7 +560,10 @@ const AccountDetail: React.FC = () => {
           const hourlyChartData: { label: string; count: number; input_tokens: number; output_tokens: number; errors: number }[] = [];
           for (let i = 23; i >= 0; i--) {
             const d = new Date(now.getTime() - i * 3600000);
-            const key = `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}`;
+            // Key must match the backend's UTC hour bucket (strftime on UTC-stored
+            // created_at); use UTC components so the join hits the right bucket.
+            // Label is the user's local wall-clock hour for that same instant.
+            const key = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}`;
             const entry = hMap.get(key);
             hourlyChartData.push({
               label: `${String(d.getHours()).padStart(2, '0')}:00`,
