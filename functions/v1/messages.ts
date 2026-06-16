@@ -267,6 +267,8 @@ async function handleStream(
 
   const encoder = new TextEncoder();
   let logFlushed = false;
+  let terminalSent = false; // finish() emits the terminal sequence exactly once
+  let hadStreamError = false; // true if the upstream stream errored mid-flight
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -301,6 +303,8 @@ async function handleStream(
       let buffer = '';
 
       const finish = (stopReason: string, errorMode: boolean) => {
+        if (terminalSent) return; // idempotent — emit message_stop exactly once
+        terminalSent = true;
         // Finish-reason handling (handler.go:387-446) + scanner-error recovery
         // (handler.go:449-500). errorMode mirrors the scanner.Err() branch: in
         // that branch empty/invalid args go through fixPartialJSON.
@@ -472,24 +476,29 @@ async function handleStream(
             }
           }
         }
-        // Stream ended naturally without an explicit finish_reason. Go would
-        // simply exit the loop. Synthesize a terminal sequence so the Anthropic
-        // SDK does not hang waiting for message_stop. Mirrors the scanner-error
-        // recovery shape (handler.go:449-500) but for a clean EOF.
-        if (!anyBlockStarted) {
-          finish('end_turn', false);
-        }
+        // Always synthesize a terminal sequence at EOF so the Anthropic SDK gets a
+        // message_stop even when the upstream ended after deltas without a
+        // finish_reason (idempotent via terminalSent). (#1)
+        finish('end_turn', false);
       } catch (err) {
-        // Mirrors scanner.Err() (handler.go:449-500): synthesize a terminal
-        // sequence so the SDK client can complete. If a tool block was
-        // mid-stream, its args get fixPartialJSON'd in errorMode.
+        // Upstream stream errored mid-flight (abort/timeout/truncation). Surface it
+        // as an Anthropic error event AND a terminal sequence so the SDK completes
+        // instead of hanging on a silent/truncated turn. (#4)
+        hadStreamError = true;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isAbort = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+        push(
+          encodeSSE('error', {
+            type: 'error',
+            error: { type: isAbort ? 'overloaded_error' : 'api_error', message: errMsg.slice(0, 500) },
+          }),
+        );
         const errorStopReason = toolBlockStarted.size > 0 ? 'tool_use' : 'end_turn';
         try {
           finish(errorStopReason, true);
         } catch {
           /* best-effort */
         }
-        void err;
       } finally {
         try {
           reader.releaseLock();
@@ -505,7 +514,7 @@ async function handleStream(
         // events (finish_reason / clean EOF / scanner error).
         if (!logFlushed) {
           logFlushed = true;
-          flushUsageAndLog(env, store, account, model, started, streamInTk, streamOutTk, waitUntil);
+          flushUsageAndLog(env, store, account, model, started, streamInTk, streamOutTk, waitUntil, hadStreamError ? 500 : 200);
         }
       }
     },
@@ -584,6 +593,8 @@ async function handleNativeAnthropicStream(
       let buffer = '';
       let pendingEvent = '';
       let firstChecked = false;
+      let sawTerminal = false; // upstream sent [DONE] / message_stop
+      let nativeHadError = false; // upstream read errored mid-flight
 
       try {
         for (;;) {
@@ -615,6 +626,7 @@ async function handleNativeAnthropicStream(
 
             if (payload === '[DONE]') {
               push('data: [DONE]\n\n');
+              sawTerminal = true;
               pendingEvent = '';
               continue;
             }
@@ -630,7 +642,16 @@ async function handleNativeAnthropicStream(
             if (!firstChecked) {
               firstChecked = true;
               if (isUpstreamError(payload)) {
-                push('');
+                // Surface the upstream error as an Anthropic error event instead of
+                // an empty body + close (which left the SDK hanging). (#3)
+                push(
+                  encodeSSE('error', {
+                    type: 'error',
+                    error: { type: 'api_error', message: payload.slice(0, 500) },
+                  }),
+                );
+                sawTerminal = true;
+                nativeHadError = true;
                 controller.close();
                 waitUntil(
                   maybeLog(
@@ -649,6 +670,7 @@ async function handleNativeAnthropicStream(
             if (eventName === '') {
               eventName = nativeAnthropicEventType(payload);
             }
+            if (eventName === 'message_stop') sawTerminal = true;
             if (eventName !== '') {
               push(`event: ${eventName}\n`);
             }
@@ -661,13 +683,30 @@ async function handleNativeAnthropicStream(
             pendingEvent = '';
           }
         }
-      } catch {
-        // scanner.Err() (handler.go:564-566) just logs.
+      } catch (err) {
+        // Upstream read failed mid-flight (abort/timeout/truncation). Mark errored;
+        // the finally synthesizes a terminal frame so the SDK doesn't hang. (#2)
+        nativeHadError = true;
+        void err;
       } finally {
         try {
           reader.releaseLock();
         } catch {
           /* noop */
+        }
+        // If the upstream closed without a terminal event (idle reset, backend
+        // restart, truncation, or the AbortSignal firing mid-body), synthesize one
+        // so the Anthropic SDK completes instead of hanging. (#2)
+        if (!sawTerminal) {
+          push(
+            encodeSSE('message_delta', {
+              type: 'message_delta',
+              delta: { stop_reason: 'end_turn', stop_sequence: null },
+              usage: { output_tokens: Math.trunc(outTk / 4) },
+            }),
+          );
+          push(encodeSSE('message_stop', { type: 'message_stop' }));
+          push('data: [DONE]\n\n');
         }
         try {
           controller.close();
@@ -676,12 +715,13 @@ async function handleNativeAnthropicStream(
         }
         const inputTokens = inTk;
         const outputTokens = outTk;
+        const status = nativeHadError ? 500 : 200;
         waitUntil(
           (async () => {
             const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
             if (enableLogging) {
               await store.logRequest(
-                makeLog(account.userId, model, '/v1/messages', true, 200, started, '', inputTokens, outputTokens),
+                makeLog(account.userId, model, '/v1/messages', true, status, started, '', inputTokens, outputTokens),
               );
             }
           })(),
@@ -819,7 +859,14 @@ function isUpstreamError(payload: string): boolean {
   } catch {
     return false;
   }
+  // OpenAI-shape: a real chat chunk carries choices; absence + error fields => error.
   if (Array.isArray(parsed['choices']) && parsed['choices'].length > 0) return false;
+  // Anthropic-native explicit error event. (#6)
+  if (parsed['type'] === 'error') return true;
+  // A valid Anthropic data event (message_*/content_*/ping) is NOT an error even if
+  // it happens to carry a status/msg field — don't false-positive it away. (#6)
+  const t = typeof parsed['type'] === 'string' ? (parsed['type'] as string) : '';
+  if (t.startsWith('message_') || t.startsWith('content_') || t === 'ping') return false;
   return (
     parsed['error'] !== undefined ||
     parsed['code'] !== undefined ||
@@ -940,13 +987,14 @@ function flushUsageAndLog(
   inputTokens: number,
   outputTokens: number,
   waitUntil: (p: Promise<unknown>) => void,
+  status: number = 200,
 ): void {
   waitUntil(
     (async () => {
       const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
       if (enableLogging) {
         await store.logRequest(
-          makeLog(account.userId, model, '/v1/messages', true, 200, started, '', inputTokens, outputTokens),
+          makeLog(account.userId, model, '/v1/messages', true, status, started, '', inputTokens, outputTokens),
         );
       }
     })(),
