@@ -86,7 +86,6 @@ async function resolveFromPtKey(
     ptKey,
     userId: '',
     baseURL: env.JOYCODE_BASE_URL,
-    saasBaseURL: env.JOYCODE_SAAS_BASE_URL,
     clientVersion: env.JOYCODE_CLIENT_VERSION,
   });
   const info = await client.userInfo(); // throws on non-200

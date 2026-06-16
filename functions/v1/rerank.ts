@@ -33,7 +33,6 @@ export const onRequestPost: PagesFunction<Env, string, V1Data> = async ({ reques
     ptKey: account.ptKey,
     userId: account.userId,
     baseURL: env.JOYCODE_BASE_URL,
-    saasBaseURL: env.JOYCODE_SAAS_BASE_URL,
     clientVersion: env.JOYCODE_CLIENT_VERSION,
   });
 

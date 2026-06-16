@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 import {
   ArrowLeft, RefreshCw, Trash2, Copy, Loader2, KeyRound, Info, ShieldCheck,
   Activity, Zap, CheckCircle2, XCircle, BarChart3, Globe, Clock,
-  ArrowLeftRight, Flame, AlertTriangle, HelpCircle,
+  ArrowLeftRight, Flame, HelpCircle,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -59,8 +59,6 @@ import { chartColor } from '@/lib/chart';
 // disallows empty-string item values, so unset is represented by this sentinel
 // and mapped back to '' in handleModelChange. (C2/F4)
 const NONE_MODEL = '__none__';
-
-const isClaudeModel = (model?: string) => model === 'Claude-Opus-4.7';
 
 const PIE_COLORS = ['#00b578', '#36cfc9', '#73d13d', '#95de64', '#1890ff', '#13c2c2', '#eb2f96', '#fa8c16'];
 
@@ -347,14 +345,6 @@ const AccountDetail: React.FC = () => {
                 ))}
               </SelectContent>
             </Select>
-            {isClaudeModel(account.default_model) && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span><Info className="size-4 text-yellow-500" /></span>
-                </TooltipTrigger>
-                <TooltipContent>Claude 模型需要本机登录 JoyCode IDE</TooltipContent>
-              </Tooltip>
-            )}
             <Button variant="outline" size="sm" onClick={handleRenew} disabled={renewing}>
               {renewing ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
               重置 Token
@@ -401,16 +391,6 @@ const AccountDetail: React.FC = () => {
           </div>
         </div>
 
-        {/* Claude warning */}
-        {isClaudeModel(account.default_model) && (
-          <div className="flex items-start gap-3 rounded-lg border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800 dark:border-yellow-700 dark:bg-yellow-950/40 dark:text-yellow-200">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <div>
-              <div className="font-medium">Claude 模型需要 JoyCode IDE 登录态</div>
-              <div className="mt-0.5 text-xs opacity-90">请确保本机 JoyCode IDE 已登录，否则 Claude 模型无法使用。</div>
-            </div>
-          </div>
-        )}
 
         {/* Quick start commands */}
         <Card>

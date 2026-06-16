@@ -9,18 +9,15 @@
 //    its own wall-clock/CPU limits). Go used http.Client{Timeout: 30m}.
 
 import { hexId } from '../util/id';
-import { anthropicHeaders, openaiHeaders } from './headers';
-import { prepareAnthropicBody, prepareBody } from './envelope';
+import { openaiHeaders } from './headers';
+import { prepareBody } from './envelope';
 import type { ModelInfo } from './models';
 
 /** Options for createJoyClient. */
 export interface JoyCodeClientOptions {
   ptKey: string;
   userId: string;
-  /** Optional override ptKey used only for Anthropic-native calls. */
-  anthropicPtKey?: string;
   baseURL: string; // e.g. https://joycode-api.jd.com
-  saasBaseURL: string; // e.g. http://joycode-api-saas.jd.com
   clientVersion: string;
   /** Request timeout in seconds. Default 1800 (30 min, matching Go). */
   timeoutSec?: number;
@@ -39,8 +36,6 @@ export interface JoyCodeClient {
   post(endpoint: string, body: Record<string, unknown>): Promise<any>;
   /** POST and return the upstream streaming Response (already 200). */
   postStream(endpoint: string, body: Record<string, unknown>): Promise<Response>;
-  /** POST (Anthropic headers/body/endpoint) and return the streaming Response. */
-  postAnthropicStream(endpoint: string, body: Record<string, unknown>): Promise<Response>;
   listModels(): Promise<ModelInfo[]>;
   webSearch(query: string): Promise<any[]>;
   rerank(query: string, documents: string[], topN: number): Promise<any>;
@@ -79,35 +74,21 @@ function timeoutSignal(timeoutSec: number): AbortSignal | undefined {
  */
 export function createJoyClient(opts: JoyCodeClientOptions): JoyCodeClient {
   const ptKey = opts.ptKey;
-  const anthropicPtKey = opts.anthropicPtKey ?? '';
   const userId = opts.userId;
   const baseURL = opts.baseURL;
-  const saasBaseURL = opts.saasBaseURL;
   const clientVersion = opts.clientVersion;
   const timeoutSec = opts.timeoutSec ?? 1800;
 
   // sessionId is per-client-once (Go: client.go:65). chatId/requestId are per-call.
   const sessionId = hexId();
 
-  // --- Low-level POST helpers (mirror doPost/doAnthropicPost, client.go:156-184) ---
+  // --- Low-level POST helper (mirror doPost, client.go:156-184) ---
 
   async function doPost(endpoint: string, body: Record<string, unknown>): Promise<Response> {
     const url = baseURL + endpoint;
     const init: RequestInit = {
       method: 'POST',
       headers: openaiHeaders(ptKey),
-      body: JSON.stringify(body),
-    };
-    const signal = timeoutSignal(timeoutSec);
-    if (signal) init.signal = signal;
-    return fetch(url, init);
-  }
-
-  async function doAnthropicPost(endpoint: string, body: Record<string, unknown>): Promise<Response> {
-    const url = saasBaseURL + endpoint;
-    const init: RequestInit = {
-      method: 'POST',
-      headers: anthropicHeaders(ptKey, anthropicPtKey),
       body: JSON.stringify(body),
     };
     const signal = timeoutSignal(timeoutSec);
@@ -147,20 +128,6 @@ export function createJoyClient(opts: JoyCodeClientOptions): JoyCodeClient {
   async function postStream(endpoint: string, extra: Record<string, unknown>): Promise<Response> {
     const body = prepareBody(userId, sessionId, extra);
     const res = await doPost(endpoint, body);
-    if (res.status !== 200) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`API error ${res.status}: ${truncate(text, 500)}`);
-    }
-    return res;
-  }
-
-  /** Anthropic-native streaming POST. (client.go:255-272) */
-  async function postAnthropicStream(
-    endpoint: string,
-    extra: Record<string, unknown>,
-  ): Promise<Response> {
-    const body = prepareAnthropicBody(userId, extra);
-    const res = await doAnthropicPost(endpoint, body);
     if (res.status !== 200) {
       const text = await res.text().catch(() => '');
       throw new Error(`API error ${res.status}: ${truncate(text, 500)}`);
@@ -235,7 +202,6 @@ export function createJoyClient(opts: JoyCodeClientOptions): JoyCodeClient {
   return {
     post,
     postStream,
-    postAnthropicStream,
     listModels,
     webSearch,
     rerank,

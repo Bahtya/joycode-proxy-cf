@@ -39,7 +39,6 @@ export interface ModelInfo {
  */
 export const MODELS: readonly string[] = [
   'JoyAI-Code-1.5',
-  'Claude-Opus-4.7',
   'MiniMax-M2.7',
   'Kimi-K2.6',
   'GLM-5.1',
@@ -59,7 +58,6 @@ export const DEFAULT_MODEL = 'JoyAI-Code-1.5';
  */
 export const DEFAULT_SELECTABLE_MODELS: readonly string[] = [
   'JoyAI-Code-1.5',
-  'Claude-Opus-4.7',
   'MiniMax-M2.7',
   'Kimi-K2.6',
   'GLM-5.1',

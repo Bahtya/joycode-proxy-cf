@@ -83,7 +83,6 @@ export const SettingKeys = {
   maxConnections: 'max_connections',
   logRetentionDays: 'log_retention_days',
   enableRequestLogging: 'enable_request_logging',
-  enableClaude: 'enable_claude',
   selectableModels: 'selectable_models',
 } as const;
 

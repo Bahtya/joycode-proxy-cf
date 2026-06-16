@@ -1,5 +1,5 @@
 // Header builders for JoyCode upstream requests.
-// Ported from pkg/joycode/client.go: headers() (lines 93-104) and anthropicHeaders() (lines 106-121).
+// Ported from pkg/joycode/client.go: headers() (lines 93-104).
 //
 // In the Go client these returned an http.Header (map[string][]string); here we
 // return a plain Record<string,string> which is the shape fetch() HeadersInit
@@ -33,27 +33,6 @@ export function openaiHeaders(ptKey: string): Record<string, string> {
     'User-Agent': USER_AGENT,
     Accept: '*/*',
     'Accept-Encoding': 'gzip, deflate, br',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    Connection: 'keep-alive',
-  };
-}
-
-/**
- * Headers for the Anthropic-native JoyCode upstream path.
- * See pkg/joycode/client.go:106-121 (anthropicHeaders()).
- *
- * `anthropicPtKey` overrides `ptKey` when set (Go: lines 107-110).
- * loginType is "PIN_JD_CLOUD" and Content-Type uses lowercase utf-8.
- */
-export function anthropicHeaders(ptKey: string, anthropicPtKey?: string): Record<string, string> {
-  const key = anthropicPtKey && anthropicPtKey !== '' ? anthropicPtKey : ptKey;
-  return {
-    'Content-Type': 'application/json; charset=utf-8',
-    ptKey: key,
-    loginType: 'PIN_JD_CLOUD',
-    'User-Agent': USER_AGENT,
-    Accept: '*/*',
-    'Accept-Encoding': 'gzip, deflate',
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     Connection: 'keep-alive',
   };

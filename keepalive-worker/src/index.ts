@@ -65,8 +65,6 @@ async function runKeepalive(env: CronEnv): Promise<void> {
       ptKey: account.ptKey,
       userId: account.userId,
       baseURL: env.JOYCODE_BASE_URL,
-      // SAAS base URL is not bound for the cron; userInfo uses the main base URL.
-      saasBaseURL: '',
       clientVersion: env.JOYCODE_CLIENT_VERSION,
     });
 

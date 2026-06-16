@@ -98,17 +98,6 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { api, accountDisplayName } from '@/api';
 import type { Account } from '@/api';
 
-const isClaudeModel = (model?: string) => model === 'Claude-Opus-4.7';
-
-const claudeDockerHint = [
-  `docker run -d \\`,
-  `  --name joycode-proxy \\`,
-  `  -p 34891:34891 \\`,
-  `  -v "$HOME/.joycode-proxy:/root/.joycode-proxy" \\`,
-  `  -v "$HOME/Library/Application Support/JoyCode/User/globalStorage/state.vscdb:/root/.joycode-ide/state.vscdb:ro" \\`,
-  `  joycode-proxy --skip-validation serve`,
-].join('\n');
-
 const getBaseURL = () => `${window.location.protocol}//${window.location.host}`;
 
 const maskUserId = (id: string): string => {
@@ -517,19 +506,9 @@ const Accounts: React.FC = () => {
             <DialogHeader>
               <DialogTitle>手动添加 JoyCode 账号</DialogTitle>
               <DialogDescription>
-                普通模型使用网页 OAuth 登录得到的账号凭证。选择 Claude 模型时，服务端还需要读取本机 JoyCode IDE 登录状态中的短 ptKey。
+                使用网页 OAuth 登录得到的账号凭证（ptKey）。
               </DialogDescription>
             </DialogHeader>
-
-            {isClaudeModel(form.default_model) && (
-              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
-                <div className="font-medium text-amber-900 dark:text-amber-200">Claude 模型需要 JoyCode IDE 已登录</div>
-                <div className="mt-1 text-amber-800 dark:text-amber-300">
-                  请先在本机 JoyCode IDE 客户端完成登录。Docker 启动时还需要挂载 JoyCode IDE 的本地状态文件，代理会从该文件自动读取 Claude 所需的短 ptKey。
-                </div>
-                <pre className="mt-2 whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">{claudeDockerHint}</pre>
-              </div>
-            )}
 
             <div className="flex flex-col gap-4">
               <div className="flex flex-col gap-2">
@@ -540,7 +519,7 @@ const Accounts: React.FC = () => {
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
-                      普通模型使用网页 OAuth 登录得到的长 ptKey。Claude 模型还会从本机 JoyCode IDE 状态文件读取短 ptKey，不会覆盖这里保存的普通账号凭证。
+                      使用网页 OAuth 登录得到的长 ptKey，作为该账号的代理凭证。
                     </TooltipContent>
                   </Tooltip>
                 </Label>
@@ -579,7 +558,7 @@ const Accounts: React.FC = () => {
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
-                      选择 Claude-Opus-4.7 时，请确保本机 JoyCode IDE 已登录，并按提示挂载 state.vscdb。非 Claude 模型继续使用网页 OAuth 凭证。
+                      留空则使用系统默认模型；实际请求中的模型由客户端指定（如启动命令里的参数），始终优先于本设置。
                     </TooltipContent>
                   </Tooltip>
                 </Label>

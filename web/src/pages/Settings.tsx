@@ -72,7 +72,7 @@ const FIELD_GROUPS: { title: string; fields: FieldConfig[] }[] = [
         key: 'selectable_models',
         label: '可选模型',
         tag: '已生效',
-        tooltip: '勾选要在各账号「默认模型」下拉中展示的模型。候选项实时来自上游 JoyCode；Claude-Opus-4.7 为代理侧 Anthropic 虚拟模型，常驻不可取消。仅影响下拉展示，不影响代理实际可转发的模型',
+        tooltip: '勾选要在各账号「默认模型」下拉中展示的模型。候选项实时来自上游 JoyCode；可手动追加自定义模型 id。仅影响下拉展示，不影响代理实际可转发的模型',
         placeholder: '',
         type: 'models',
       },
@@ -201,8 +201,7 @@ const SettingsPage: React.FC = () => {
   };
 
   // Load the effective selectable list (/api/models, seed-included) and the live
-  // upstream candidates (/api/upstream-models) for the editor. Claude-Opus-4.7 is
-  // always forced present as a persistent virtual model.
+  // upstream candidates (/api/upstream-models) for the editor.
   const fetchModelConfig = async () => {
     let eff: ModelInfo[] = [];
     let ups: ModelInfo[] = [];
@@ -215,16 +214,13 @@ const SettingsPage: React.FC = () => {
       ups = await api.listUpstreamModels();
       setUpstreamModels(ups);
     } catch {
-      // upstream candidates optional — editor still works with eff + Claude
+      // upstream candidates optional
     }
     // Enrich the default_model dropdown labels with upstream names (F2): /api/models
     // returns name=id, so prefer the upstream label when available.
     const labelMap = new Map(ups.map((m) => [m.id, m.name || m.id]));
-    const withClaude = eff.some((m) => m.id === 'Claude-Opus-4.7')
-      ? eff
-      : [...eff, { id: 'Claude-Opus-4.7', name: 'Claude-Opus-4.7' }];
-    setSelectableModels(withClaude.map((m) => m.id));
-    setModelOptions(withClaude.map((m) => ({ label: labelMap.get(m.id) || m.name || m.id, value: m.id })));
+    setSelectableModels(eff.map((m) => m.id));
+    setModelOptions(eff.map((m) => ({ label: labelMap.get(m.id) || m.name || m.id, value: m.id })));
   };
 
   // Refresh both scalar setting values and the model-editor state (used by the banner
@@ -389,13 +385,11 @@ const SettingsPage: React.FC = () => {
             </div>
           );
         case 'models': {
-          const CLAUDE = 'Claude-Opus-4.7';
           const candidateIds = new Set(upstreamModels.map((m) => m.id));
-          const extras = selectableModels.filter((id) => id !== CLAUDE && !candidateIds.has(id));
-          const upstreamRows = upstreamModels.map((m) => ({ id: m.id, label: m.name || m.id, virtual: m.id === CLAUDE }));
-          const extraRows = extras.map((id) => ({ id, label: id, virtual: false }));
-          let rows = [...upstreamRows, ...extraRows];
-          if (!rows.some((r) => r.id === CLAUDE)) rows = [{ id: CLAUDE, label: CLAUDE, virtual: true }, ...rows];
+          const extras = selectableModels.filter((id) => !candidateIds.has(id));
+          const upstreamRows = upstreamModels.map((m) => ({ id: m.id, label: m.name || m.id }));
+          const extraRows = extras.map((id) => ({ id, label: id }));
+          const rows = [...upstreamRows, ...extraRows];
           const addCustom = () => {
             const id = customModel.trim();
             if (!id) return;
@@ -415,13 +409,9 @@ const SettingsPage: React.FC = () => {
                     <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2">
                       <div className="flex min-w-0 flex-col">
                         <span className="truncate text-sm font-medium">{r.label}</span>
-                        {r.virtual && (
-                          <span className="text-[11px] text-muted-foreground">Anthropic 虚拟模型 · 常驻</span>
-                        )}
                       </div>
                       <Switch
                         checked={checked}
-                        disabled={r.virtual}
                         onCheckedChange={(c) =>
                           setSelectableModels((prev) =>
                             c ? (prev.includes(r.id) ? prev : [...prev, r.id]) : prev.filter((x) => x !== r.id),

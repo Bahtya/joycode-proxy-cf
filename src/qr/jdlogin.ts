@@ -411,7 +411,6 @@ async function buildLoginResult(env: Env, ptKey: string, ptPin: string): Promise
     ptKey,
     userId: '', // unknown until userInfo resolves it
     baseURL: env.JOYCODE_BASE_URL,
-    saasBaseURL: env.JOYCODE_SAAS_BASE_URL,
     clientVersion: env.JOYCODE_CLIENT_VERSION,
   });
 
@@ -480,7 +479,6 @@ export async function validateAndSave(
     ptKey,
     userId: '',
     baseURL: env.JOYCODE_BASE_URL,
-    saasBaseURL: env.JOYCODE_SAAS_BASE_URL,
     clientVersion: env.JOYCODE_CLIENT_VERSION,
   });
 

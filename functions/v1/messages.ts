@@ -1,11 +1,8 @@
 // POST /v1/messages — Anthropic Messages API.
 //
 // Ports pkg/anthropic/handler.go: handleMessages (:47), handleStream SSE state
-// machine (:204-504), handleNativeAnthropicStream identity-passthrough
-// (:506-570), connectStreamWithRetry (:854), fixPartialJSON (:802-850); and
-// pkg/anthropic/translate.go: TranslateResponse (:127-184), TranslateRequest,
-// TranslateAnthropicRequest (:45-69), IsNativeAnthropicModel (:93-96),
-// ClaudeNativeEnabled (:86-91).
+// machine (:204-504), connectStreamWithRetry (:854), fixPartialJSON (:802-850); and
+// pkg/anthropic/translate.go: TranslateResponse (:127-184), TranslateRequest.
 //
 // This is the most correctness-critical route. The streaming state machine must
 // faithfully reproduce the OpenAI-delta → Anthropic-event conversion including:
@@ -21,7 +18,7 @@
 // Differences from Go (serverless / Workers runtime):
 //   - Account comes from data.account (functions/v1/_middleware.ts), not a
 //     per-request resolver closure.
-//   - Workers fetch() auto-decompresses; postStream/postAnthropicStream return a
+//   - Workers fetch() auto-decompresses; postStream returns a
 //     Response whose .body is a streaming ReadableStream — we consume it with a
 //     reader + TextDecoder and feed buffered text into parseSSEChunk. (Go used
 //     bufio.Scanner over resp.Body.)
@@ -45,7 +42,6 @@ import { msgId, tooluId } from '../../src/util/id';
 import {
   translateRequest,
   translateResponse,
-  resolveModel,
   fixPartialJSON,
   type AnthropicRequest,
   type StreamChunk,
@@ -53,7 +49,6 @@ import {
 import { encodeSSE, parseSSEChunk } from '../../src/translate/sse';
 
 const CHAT_ENDPOINT = '/api/saas/openai/v1/chat/completions';
-const ANTHROPIC_ENDPOINT = '/api/saas/anthropic/v1/messages';
 
 const SSE_HEADERS: Record<string, string> = {
   'Content-Type': 'text/event-stream; charset=utf-8',
@@ -95,32 +90,11 @@ export const onRequestPost: PagesFunction<Env, string, V1Data> = async (ctx) => 
     ptKey: account.ptKey,
     userId: account.userId,
     baseURL: env.JOYCODE_BASE_URL,
-    saasBaseURL: env.JOYCODE_SAAS_BASE_URL,
     clientVersion: env.JOYCODE_CLIENT_VERSION,
     timeoutSec: parseInt(env.DEFAULT_TIMEOUT, 10),
   });
 
   const started = Date.now();
-
-  // Native Anthropic passthrough decision (handler.go:214, :100).
-  // enable_claude on AND model is Claude-family → native path. Go forces stream
-  // for native; non-stream+native has no Go handler so we fall back to the
-  // translated non-stream path (task spec).
-  const settings = await ensureSettings(ctx);
-  const nativeEnabled = (settings['enable_claude'] ?? 'false') === 'true';
-  const nativeModel =
-    nativeEnabled &&
-    (isNativeAnthropicModel(req.model) ||
-      isNativeAnthropicModel(
-        resolveModel(req.model ?? '', account.defaultModel ?? '', settings['default_model'] ?? ''),
-      ));
-
-  if (nativeModel) {
-    if (req.stream === true) {
-      return handleNativeAnthropicStream(ctx, account, req, client, started);
-    }
-    // No Go handler for non-stream + native: fall through to translated path.
-  }
 
   if (req.stream === true) {
     return handleStream(ctx, account, req, client, started);
@@ -521,361 +495,6 @@ async function handleStream(
   });
 
   return new Response(stream, { headers: SSE_HEADERS });
-}
-
-// ---------------------------------------------------------------------------
-// Native Anthropic passthrough — handleNativeAnthropicStream (handler.go:506-570)
-// ---------------------------------------------------------------------------
-
-/**
- * Identity-pipe the upstream Anthropic SSE stream to the client.
- *
- * Ports handleNativeAnthropicStream (handler.go:506-570):
- *   - re-emit each `event:` / `data:` line;
- *   - when a frame carries no explicit event:, re-derive the event name from the
- *     payload's `type` field (nativeAnthropicEventType :746-754);
- *   - track input/output token usage from message_start / message_delta usage
- *     payloads (updateNativeAnthropicUsage :767-799);
- *   - forward `[DONE]` verbatim.
- *
- * connectNativeAnthropicStreamWithRetry (:695-733) peeked the first line for an
- * upstream error before committing. postAnthropicStream already throws on
- * non-200, so the only remaining error surface is a 200 body whose first parsed
- * payload has an "error" field — handled by the same first-payload check.
- */
-async function handleNativeAnthropicStream(
-  ctx: Parameters<PagesFunction<Env, string, V1Data>>[0],
-  account: Account,
-  req: AnthropicRequest,
-  client: ReturnType<typeof createJoyClient>,
-  started: number,
-): Promise<Response> {
-  const { env, waitUntil } = ctx;
-  const store = createStore(env.DB, env.PTKEY_ENC_KEY);
-  const systemDefault = (await ensureSettings(ctx))['default_model'] ?? '';
-
-  const body = translateAnthropicRequest(req, account.defaultModel ?? '', systemDefault);
-
-  let upstream: Response;
-  try {
-    upstream = await client.postAnthropicStream(ANTHROPIC_ENDPOINT, body);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    waitUntil(
-      maybeLog(env, store, makeLog(account.userId, req.model ?? '', '/v1/messages', true, 500, started, msg, 0, 0)),
-    );
-    return jsonError(500, msg);
-  }
-
-  const upstreamBody = upstream.body;
-  if (!upstreamBody) {
-    return jsonError(502, 'upstream returned no body');
-  }
-
-  const model = req.model ?? '';
-  let inTk = 0;
-  let outTk = 0;
-
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const push = (s: string) => {
-        try {
-          controller.enqueue(encoder.encode(s));
-        } catch {
-          /* client gone */
-        }
-      };
-
-      const reader = upstreamBody.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let pendingEvent = '';
-      let firstChecked = false;
-      let sawTerminal = false; // upstream sent [DONE] / message_stop / event:error
-      let nativeHadError = false; // upstream read errored mid-flight
-      let nativeErrMsg = ''; // captured error text for the single log row
-
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          // The upstream is a sequence of SSE frames; parse them.
-          const { events, rest } = parseSSEChunk(buffer);
-          buffer = rest;
-
-          for (const ev of events) {
-            // ev.event is the explicit event name if the frame had an event:
-            // line; ev.data is the concatenated data payload.
-            // Reproduce the Go scanner semantics: an `event:` frame sets
-            // pendingEvent and is otherwise emitted only via the following
-            // `data:` frame. parseSSEChunk already groups event+data into one
-            // SSEEvent when they share a frame, so ev.event acts as the
-            // pendingEvent for ev.data.
-            const explicitEvent = ev.event;
-            const payload = ev.data;
-
-            if (payload === '') {
-              // Frame had only an event: line with no data: → treat as
-              // pendingEvent for the next frame (Go: continue).
-              if (explicitEvent) pendingEvent = explicitEvent;
-              continue;
-            }
-
-            if (payload === '[DONE]') {
-              push('data: [DONE]\n\n');
-              sawTerminal = true;
-              pendingEvent = '';
-              continue;
-            }
-
-            if (!payload.startsWith('{')) {
-              // Non-JSON payload; ignore (handler.go:549-551).
-              pendingEvent = '';
-              continue;
-            }
-
-            // First-payload error peek (connectNativeAnthropicStreamWithRetry
-            // :721 nativeAnthropicLineError / isUpstreamError).
-            if (!firstChecked) {
-              firstChecked = true;
-              if (isUpstreamError(payload)) {
-                // Surface the upstream error as an Anthropic error event instead of
-                // an empty body + close (which left the SDK hanging). (#3)
-                nativeErrMsg = payload.slice(0, 500);
-                push(
-                  encodeSSE('error', {
-                    type: 'error',
-                    error: { type: 'api_error', message: nativeErrMsg },
-                  }),
-                );
-                sawTerminal = true;
-                nativeHadError = true;
-                controller.close();
-                return; // finally logs once (status 500, nativeErrMsg)
-              }
-            }
-
-            // Derive event name (handler.go:552-558).
-            let eventName = pendingEvent;
-            if (explicitEvent) eventName = explicitEvent;
-            if (eventName === '') {
-              eventName = nativeAnthropicEventType(payload);
-            }
-            if (eventName === 'message_stop') sawTerminal = true;
-            if (eventName !== '') {
-              push(`event: ${eventName}\n`);
-            }
-            push(`data: ${payload}\n\n`);
-
-            updateNativeAnthropicUsage(payload, (i, o) => {
-              if (i > 0) inTk = i;
-              if (o > 0) outTk = o;
-            });
-            pendingEvent = '';
-          }
-        }
-      } catch (err) {
-        // Upstream read failed mid-flight (abort/timeout/truncation). Surface it as an
-        // event:error so the client sees the failure (not a silent/fake success), and
-        // mark terminal so the finally skips synthesizing a clean message_stop. (#2)
-        nativeHadError = true;
-        nativeErrMsg = err instanceof Error ? err.message : String(err);
-        push(
-          encodeSSE('error', {
-            type: 'error',
-            error: { type: 'api_error', message: nativeErrMsg.slice(0, 500) },
-          }),
-        );
-        sawTerminal = true;
-      } finally {
-        try {
-          reader.releaseLock();
-        } catch {
-          /* noop */
-        }
-        // Clean EOF without a terminal event (no [DONE]/message_stop and no error):
-        // synthesize one so the Anthropic SDK completes instead of hanging. Error
-        // paths already set sawTerminal after emitting event:error. (#2)
-        if (!sawTerminal) {
-          push(
-            encodeSSE('message_delta', {
-              type: 'message_delta',
-              delta: { stop_reason: 'end_turn', stop_sequence: null },
-              usage: { output_tokens: Math.trunc(outTk / 4) },
-            }),
-          );
-          push(encodeSSE('message_stop', { type: 'message_stop' }));
-          push('data: [DONE]\n\n');
-        }
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-        const inputTokens = inTk;
-        const outputTokens = outTk;
-        const status = nativeHadError ? 500 : 200;
-        waitUntil(
-          (async () => {
-            const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
-            if (enableLogging) {
-              await store.logRequest(
-                makeLog(account.userId, model, '/v1/messages', true, status, started, nativeErrMsg, inputTokens, outputTokens),
-              );
-            }
-          })(),
-        );
-      }
-    },
-  });
-
-  return new Response(stream, { headers: SSE_HEADERS });
-}
-
-// ---------------------------------------------------------------------------
-// Native Anthropic request translation — TranslateAnthropicRequest
-// (translate.go:45-69, 71-81, 98-107)
-// ---------------------------------------------------------------------------
-
-/**
- * Build the body for JoyCode's native Anthropic endpoint. Claude-family models
- * reject the legacy OpenAI path, so the request is largely passed through with
- * Anthropic-native field names; model is resolved through the native resolver
- * which forces Claude → "Claude-Opus-4.7".
- */
-function translateAnthropicRequest(
-  req: AnthropicRequest,
-  accountDefault: string,
-  systemDefault: string,
-): Record<string, unknown> {
-  const model = resolveNativeAnthropicModel(req.model ?? '', accountDefault, systemDefault);
-  const body: Record<string, unknown> = {
-    model,
-    // req.messages are Anthropic-shaped already; pass verbatim (Go: req.Messages).
-    messages: req.messages ?? [],
-    stream: true,
-    max_tokens: req.max_tokens,
-    thinking: { type: 'disabled' },
-  };
-  if (req.system !== undefined && req.system !== null) {
-    body['system'] = normalizeAnthropicSystem(req.system);
-  }
-  if (req.stop_sequences && req.stop_sequences.length > 0) {
-    body['stop_sequences'] = req.stop_sequences;
-  }
-  if (req.tools && req.tools.length > 0) {
-    body['tools'] = req.tools;
-  }
-  if (req.tool_choice !== undefined && req.tool_choice !== null) {
-    body['tool_choice'] = req.tool_choice;
-  }
-  return body;
-}
-
-/** normalizeAnthropicSystem (translate.go:71-81). */
-function normalizeAnthropicSystem(raw: unknown): unknown {
-  if (typeof raw === 'string') {
-    return [{ type: 'text', text: raw }];
-  }
-  if (Array.isArray(raw)) {
-    return raw;
-  }
-  return raw;
-}
-
-/** resolveNativeAnthropicModel (translate.go:98-107). */
-function resolveNativeAnthropicModel(model: string, accountDefault: string, systemDefault: string): string {
-  const resolved = resolveModel(model, accountDefault, systemDefault);
-  if (resolved === 'Claude-Opus-4.7') return resolved;
-  if (isNativeAnthropicModel(resolved)) return 'Claude-Opus-4.7';
-  return resolved;
-}
-
-/** IsNativeAnthropicModel (translate.go:93-96). */
-function isNativeAnthropicModel(model: string | undefined): boolean {
-  const m = (model ?? '').toLowerCase();
-  return m.startsWith('claude') || m.includes('claude-');
-}
-
-// ---------------------------------------------------------------------------
-// Native Anthropic SSE helpers (handler.go:735-805)
-// ---------------------------------------------------------------------------
-
-/**
- * Derive an Anthropic event name from a payload's `type` field
- * (nativeAnthropicEventType :746-754). Returns '' on parse failure.
- */
-function nativeAnthropicEventType(payload: string): string {
-  try {
-    const obj = JSON.parse(payload) as { type?: unknown };
-    if (typeof obj.type === 'string') return obj.type;
-  } catch {
-    /* return '' */
-  }
-  return '';
-}
-
-/**
- * Update input/output token totals from a native Anthropic SSE payload
- * (updateNativeAnthropicUsage :767-799). Inspects both message.usage and the
- * top-level usage object.
- */
-function updateNativeAnthropicUsage(payload: string, sink: (inputTokens: number, outputTokens: number) => void): void {
-  try {
-    const event = JSON.parse(payload) as {
-      message?: { usage?: { input_tokens?: number; output_tokens?: number } };
-      usage?: { input_tokens?: number; output_tokens?: number };
-    };
-    let inTk = 0;
-    let outTk = 0;
-    if (event.message?.usage) {
-      if (typeof event.message.usage.input_tokens === 'number') inTk = event.message.usage.input_tokens;
-      if (typeof event.message.usage.output_tokens === 'number') outTk = event.message.usage.output_tokens;
-    }
-    if (inTk === 0 && event.usage && typeof event.usage.input_tokens === 'number') {
-      inTk = event.usage.input_tokens;
-    }
-    if (outTk === 0 && event.usage && typeof event.usage.output_tokens === 'number') {
-      outTk = event.usage.output_tokens;
-    }
-    sink(inTk, outTk);
-  } catch {
-    /* swallow */
-  }
-}
-
-/**
- * isUpstreamError (handler.go:987-1005): a JSON payload is an upstream error if
- * it has no `choices` AND has any of error/code/status/msg.
- */
-function isUpstreamError(payload: string): boolean {
-  if (payload === '' || payload === '[DONE]') return false;
-  let parsed: Record<string, unknown>;
-  try {
-    const p = JSON.parse(payload);
-    if (!p || typeof p !== 'object') return false;
-    parsed = p as Record<string, unknown>;
-  } catch {
-    return false;
-  }
-  // OpenAI-shape: a real chat chunk carries choices; absence + error fields => error.
-  if (Array.isArray(parsed['choices']) && parsed['choices'].length > 0) return false;
-  // Anthropic-native explicit error event. (#6)
-  if (parsed['type'] === 'error') return true;
-  // A valid Anthropic data event (message_*/content_*/ping) is NOT an error even if
-  // it happens to carry a status/msg field — don't false-positive it away. (#6)
-  const t = typeof parsed['type'] === 'string' ? (parsed['type'] as string) : '';
-  if (t.startsWith('message_') || t.startsWith('content_') || t === 'ping') return false;
-  return (
-    parsed['error'] !== undefined ||
-    parsed['code'] !== undefined ||
-    (typeof parsed['status'] === 'string' && parsed['status'] !== '') ||
-    (typeof parsed['msg'] === 'string' && parsed['msg'] !== '')
-  );
 }
 
 // ---------------------------------------------------------------------------

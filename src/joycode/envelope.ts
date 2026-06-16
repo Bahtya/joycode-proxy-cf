@@ -1,6 +1,5 @@
 // Request body builders ("envelopes") for JoyCode upstream calls.
-// Ported from pkg/joycode/client.go: prepareBody() (lines 123-139) and
-// prepareAnthropicBody() (lines 141-154).
+// Ported from pkg/joycode/client.go: prepareBody() (lines 123-139).
 
 import { hexId } from '../util/id';
 import { CLIENT_VERSION } from './headers';
@@ -34,31 +33,6 @@ export function prepareBody(
     body.requestId = hexId();
   }
   // Merge caller extras last so they override the defaults.
-  for (const k of Object.keys(extra)) {
-    body[k] = extra[k];
-  }
-  return body;
-}
-
-/**
- * Build the Anthropic-native JoyCode request envelope.
- * See pkg/joycode/client.go:141-154 (prepareAnthropicBody).
- *
- * tenant=JD, language=UNKNOWN, stream=true (hardcoded); caller extras override.
- * Note: unlike prepareBody, no chatId/requestId/sessionId are injected here.
- */
-export function prepareAnthropicBody(
-  userId: string,
-  extra: Record<string, unknown> = {},
-): Record<string, unknown> {
-  const body: Record<string, unknown> = {
-    tenant: 'JD',
-    userId,
-    client: 'JoyCode',
-    clientVersion: CLIENT_VERSION,
-    language: 'UNKNOWN',
-    stream: true,
-  };
   for (const k of Object.keys(extra)) {
     body[k] = extra[k];
   }
