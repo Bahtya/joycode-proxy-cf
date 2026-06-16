@@ -195,8 +195,6 @@ export const api = {
     request<{ ok: boolean }>(`/api/accounts/${encodeURIComponent(userId)}`, { method: 'DELETE' }),
   setDefault: (userId: string) =>
     request<{ ok: boolean }>(`/api/accounts/${encodeURIComponent(userId)}/default`, { method: 'PUT' }),
-  validateAccount: (userId: string) =>
-    request<{ valid: boolean }>(`/api/accounts/${encodeURIComponent(userId)}/validate`, { method: 'POST' }),
   diagnoseAccount: (userId: string) =>
     request<DiagnoseResult>(`/api/accounts/${encodeURIComponent(userId)}/diagnose`, { method: 'POST' }),
   listModels: () => request<{ models: ModelInfo[] }>('/api/models').then(r => r.models),

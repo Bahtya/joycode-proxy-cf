@@ -593,8 +593,9 @@ async function handleNativeAnthropicStream(
       let buffer = '';
       let pendingEvent = '';
       let firstChecked = false;
-      let sawTerminal = false; // upstream sent [DONE] / message_stop
+      let sawTerminal = false; // upstream sent [DONE] / message_stop / event:error
       let nativeHadError = false; // upstream read errored mid-flight
+      let nativeErrMsg = ''; // captured error text for the single log row
 
       try {
         for (;;) {
@@ -644,23 +645,17 @@ async function handleNativeAnthropicStream(
               if (isUpstreamError(payload)) {
                 // Surface the upstream error as an Anthropic error event instead of
                 // an empty body + close (which left the SDK hanging). (#3)
+                nativeErrMsg = payload.slice(0, 500);
                 push(
                   encodeSSE('error', {
                     type: 'error',
-                    error: { type: 'api_error', message: payload.slice(0, 500) },
+                    error: { type: 'api_error', message: nativeErrMsg },
                   }),
                 );
                 sawTerminal = true;
                 nativeHadError = true;
                 controller.close();
-                waitUntil(
-                  maybeLog(
-                    env,
-                    store,
-                    makeLog(account.userId, model, '/v1/messages', true, 500, started, payload.slice(0, 500), 0, 0),
-                  ),
-                );
-                return;
+                return; // finally logs once (status 500, nativeErrMsg)
               }
             }
 
@@ -684,19 +679,27 @@ async function handleNativeAnthropicStream(
           }
         }
       } catch (err) {
-        // Upstream read failed mid-flight (abort/timeout/truncation). Mark errored;
-        // the finally synthesizes a terminal frame so the SDK doesn't hang. (#2)
+        // Upstream read failed mid-flight (abort/timeout/truncation). Surface it as an
+        // event:error so the client sees the failure (not a silent/fake success), and
+        // mark terminal so the finally skips synthesizing a clean message_stop. (#2)
         nativeHadError = true;
-        void err;
+        nativeErrMsg = err instanceof Error ? err.message : String(err);
+        push(
+          encodeSSE('error', {
+            type: 'error',
+            error: { type: 'api_error', message: nativeErrMsg.slice(0, 500) },
+          }),
+        );
+        sawTerminal = true;
       } finally {
         try {
           reader.releaseLock();
         } catch {
           /* noop */
         }
-        // If the upstream closed without a terminal event (idle reset, backend
-        // restart, truncation, or the AbortSignal firing mid-body), synthesize one
-        // so the Anthropic SDK completes instead of hanging. (#2)
+        // Clean EOF without a terminal event (no [DONE]/message_stop and no error):
+        // synthesize one so the Anthropic SDK completes instead of hanging. Error
+        // paths already set sawTerminal after emitting event:error. (#2)
         if (!sawTerminal) {
           push(
             encodeSSE('message_delta', {
@@ -721,7 +724,7 @@ async function handleNativeAnthropicStream(
             const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
             if (enableLogging) {
               await store.logRequest(
-                makeLog(account.userId, model, '/v1/messages', true, status, started, '', inputTokens, outputTokens),
+                makeLog(account.userId, model, '/v1/messages', true, status, started, nativeErrMsg, inputTokens, outputTokens),
               );
             }
           })(),

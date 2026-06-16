@@ -47,8 +47,6 @@ export interface JoyCodeClient {
   userInfo(): Promise<any>;
   /** Returns the refreshed ptKey from the userInfo data, or '' if absent. */
   userInfoWithRefresh(): Promise<string>;
-  /** Throws if the credential is invalid (userInfo code !== 0). */
-  validate(): Promise<void>;
 }
 
 /** Truncate a string to maxLen chars, appending "..." if truncated. See client.go:363-368. */
@@ -215,22 +213,6 @@ export function createJoyClient(opts: JoyCodeClientOptions): JoyCodeClient {
   }
 
   /**
-   * Validate credential: userInfo must return code===0. (client.go:322-336)
-   * Throws on transport error or non-zero code.
-   */
-  async function validate(): Promise<void> {
-    const resp = await userInfo().catch((err: unknown) => {
-      throw new Error(`credential validation failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
-    const code = resp?.code;
-    if (typeof code !== 'number' || code !== 0) {
-      const msg = typeof resp?.msg === 'string' && resp.msg !== '' ? resp.msg : 'unknown error';
-      const codeStr = typeof code === 'number' ? Math.round(code).toString() : String(code ?? '');
-      throw new Error(`credential validation failed (code=${codeStr}): ${msg}`);
-    }
-  }
-
-  /**
    * userInfo, then return data.ptKey if non-empty else ''. (client.go:338-361)
    * Throws on transport error or non-zero code (matches Go).
    */
@@ -259,7 +241,6 @@ export function createJoyClient(opts: JoyCodeClientOptions): JoyCodeClient {
     rerank,
     userInfo,
     userInfoWithRefresh,
-    validate,
   };
 }
 
