@@ -18,6 +18,18 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Thrown when the upstream returned HTTP 200 but produced no usable completion
+ * (no `choices`, or a non-SSE body for a stream request) — JoyCode's intermittent
+ * "empty 200" flap. Treated as transient so withRetry retries it.
+ */
+export class EmptyUpstreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmptyUpstreamError';
+  }
+}
+
+/**
  * True if an error is a transient upstream/transport failure worth retrying:
  * timeouts/aborts, network errors, upstream 5xx, 429, and CDN/WAF edge blocks
  * (the Cloudflare "DNS points to local or disallowed IP" 403 page). Real 4xx
@@ -31,6 +43,7 @@ export function isTransientUpstreamError(err: unknown): boolean {
   }
   const name = err.name;
   if (name === 'AbortError' || name === 'TimeoutError') return true;
+  if (name === 'EmptyUpstreamError') return true;
   const msg = err.message.toLowerCase();
   if (/fetch failed|network|econnreset|socket hang up|terminated/.test(msg)) return true;
 

@@ -37,7 +37,14 @@ const NOISE_TOKENS = new Set([
  * Identify the calling client from its User-Agent (and, as a last resort, the
  * endpoint protocol). Never throws; always returns a non-empty label.
  */
-export function detectClient(userAgent: string | null, endpoint = ''): string {
+export function detectClient(userAgent: string | null, endpoint = '', appHint?: string | null): string {
+  // Explicit client hint wins (e.g. an OpenAI-SDK client that forwards a
+  // ?app=<name> query param via default_query — Hermes does this when its
+  // base_url carries a query string). Lets apps identify themselves without a
+  // distinctive User-Agent.
+  const hint = (appHint ?? '').trim();
+  if (hint !== '') return hint;
+
   const ua = (userAgent ?? '').trim();
   const lower = ua.toLowerCase();
 

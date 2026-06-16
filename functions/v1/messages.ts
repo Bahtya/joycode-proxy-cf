@@ -38,7 +38,7 @@ import { createStore } from '../../src/store/d1';
 import { getSetting } from '../../src/store/settings';
 import { readJson, jsonError } from '../../src/util/http';
 import { createJoyClient } from '../../src/joycode/client';
-import { withRetry, parseRetries } from '../../src/proxy/retry';
+import { withRetry, parseRetries, EmptyUpstreamError } from '../../src/proxy/retry';
 import { msgId, tooluId } from '../../src/util/id';
 import {
   translateRequest,
@@ -124,7 +124,12 @@ async function handleNonStream(
 
   let jcResp: Record<string, unknown>;
   try {
-    jcResp = await withRetry(() => client.post(CHAT_ENDPOINT, jcBody), maxRetries);
+    jcResp = await withRetry(async () => {
+      const r = await client.post(CHAT_ENDPOINT, jcBody);
+      if (!r || !Array.isArray(r.choices) || r.choices.length === 0)
+        throw new EmptyUpstreamError('no choices in response');
+      return r;
+    }, maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '');
@@ -205,7 +210,17 @@ async function handleStream(
 
   let upstream: Response;
   try {
-    upstream = await withRetry(() => client.postStream(CHAT_ENDPOINT, jcBody), maxRetries);
+    upstream = await withRetry(async () => {
+      const r = await client.postStream(CHAT_ENDPOINT, jcBody);
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('text/event-stream')) {
+        // Non-SSE body (e.g. a JSON error) on a stream request — JoyCode's
+        // empty/error flap. Drain + discard, then retry.
+        const body = await r.text().catch(() => '');
+        throw new EmptyUpstreamError(`non-event-stream response (${ct}): ${body.slice(0, 200)}`);
+      }
+      return r;
+    }, maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     waitUntil(

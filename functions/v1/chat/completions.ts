@@ -20,7 +20,7 @@ import { ensureSettings } from '../_middleware';
 import { createStore } from '../../../src/store/d1';
 import { readJson, jsonError } from '../../../src/util/http';
 import { createJoyClient } from '../../../src/joycode/client';
-import { withRetry, parseRetries } from '../../../src/proxy/retry';
+import { withRetry, parseRetries, EmptyUpstreamError } from '../../../src/proxy/retry';
 import { MODELS } from '../../../src/joycode/models';
 import {
   translateOpenAIRequest,
@@ -92,7 +92,12 @@ async function handleNonStream(
   const maxRetries = parseRetries((await ensureSettings(ctx))['max_retries']);
   let resp: Record<string, unknown>;
   try {
-    resp = await withRetry(() => client.post(CHAT_ENDPOINT, jcBody), maxRetries);
+    resp = await withRetry(async () => {
+      const r = await client.post(CHAT_ENDPOINT, jcBody);
+      if (!r || !Array.isArray(r.choices) || r.choices.length === 0)
+        throw new EmptyUpstreamError('no choices in response');
+      return r;
+    }, maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (isTimeoutError(msg)) {
@@ -150,7 +155,15 @@ async function handleStream(
   const maxRetries = parseRetries((await ensureSettings(ctx))['max_retries']);
   let upstream: Response;
   try {
-    upstream = await withRetry(() => client.postStream(CHAT_ENDPOINT, jcBody), maxRetries);
+    upstream = await withRetry(async () => {
+      const r = await client.postStream(CHAT_ENDPOINT, jcBody);
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('text/event-stream')) {
+        const body = await r.text().catch(() => '');
+        throw new EmptyUpstreamError(`non-event-stream response (${ct}): ${body.slice(0, 200)}`);
+      }
+      return r;
+    }, maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // chat.go:73-83: emit an error chunk then [DONE] on upstream failure.

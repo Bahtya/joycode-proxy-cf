@@ -75,6 +75,15 @@ export interface KeepaliveStatusRow {
   updated_at: string;
 }
 
+/** One per-minute upstream availability probe sample (availability_samples table). */
+export interface AvailabilitySample {
+  ts: string;
+  ok: number; // 1 = chat probe returned choices, 0 = empty/error
+  chat_ms: number;
+  ping_ms: number;
+  error: string;
+}
+
 // Settings keys (mirror pkg/store settings used across the Go app).
 export const SettingKeys = {
   authPasswordHash: 'auth_password_hash',

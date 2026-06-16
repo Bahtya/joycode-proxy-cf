@@ -1,6 +1,6 @@
 // D1-backed store: accounts, keepalive, request logs.
 // Ports pkg/store/store.go account CRUD + keepalive helpers + LogRequest.
-import type { Account, AccountRow, RequestLogRow, KeepaliveStatusRow } from '../types';
+import type { Account, AccountRow, RequestLogRow, KeepaliveStatusRow, AvailabilitySample } from '../types';
 import { encrypt, decrypt } from './crypto';
 import { hexId } from '../util/id';
 
@@ -288,6 +288,28 @@ export class Store {
         this.db.prepare('DELETE FROM request_logs WHERE date(created_at) = ?').bind(d),
       ]);
     }
+  }
+
+  // --- Availability monitoring (1-min upstream probe samples) ---
+
+  /** Insert one availability sample + prune rows older than 60 minutes (atomic). */
+  async recordAvailabilitySample(ok: number, chatMs: number, pingMs: number, error: string): Promise<void> {
+    await this.db.batch([
+      this.db
+        .prepare('INSERT INTO availability_samples (ok, chat_ms, ping_ms, error) VALUES (?, ?, ?, ?)')
+        .bind(ok, chatMs, pingMs, error),
+      this.db.prepare("DELETE FROM availability_samples WHERE ts < datetime('now', '-60 minutes')"),
+    ]);
+  }
+
+  /** Last 60 minutes of availability samples, oldest first. */
+  async getAvailabilitySamples(): Promise<AvailabilitySample[]> {
+    const { results } = await this.db
+      .prepare(
+        "SELECT ts, ok, chat_ms, ping_ms, error FROM availability_samples WHERE ts >= datetime('now', '-60 minutes') ORDER BY ts ASC",
+      )
+      .all<AvailabilitySample>();
+    return results ?? [];
   }
 }
 

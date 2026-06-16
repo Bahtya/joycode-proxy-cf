@@ -118,14 +118,75 @@ async function runKeepalive(env: CronEnv): Promise<void> {
   await store.cleanupOldLogs(retentionDays > 0 ? retentionDays : 30);
 }
 
+const PROBE_CHAT_ENDPOINT = '/api/saas/openai/v1/chat/completions';
+
+/**
+ * One-minute upstream availability probe for the dashboard card. Pings the
+ * endpoint (network RTT) and issues a single tiny chat request (max_tokens:1);
+ * ok iff the chat returned choices. NOT retried — the sample reflects JoyCode's
+ * raw health so flaps show red (real traffic is retried by the proxy). Records
+ * one row + prunes rows older than 60 minutes.
+ */
+async function runAvailabilityProbe(env: CronEnv): Promise<void> {
+  const store = createStore(env.DB, env.PTKEY_ENC_KEY);
+  const account = await store.getDefaultAccount();
+  if (!account || !account.userId) return; // no account configured — nothing to probe
+
+  const client = createJoyClient({
+    ptKey: account.ptKey,
+    userId: account.userId,
+    baseURL: env.JOYCODE_BASE_URL,
+    clientVersion: env.JOYCODE_CLIENT_VERSION,
+  });
+
+  // 1) Endpoint ping — pure network reachability/RTT, free (no quota).
+  let pingMs = 0;
+  try {
+    const t = Date.now();
+    await fetch(env.JOYCODE_BASE_URL, { method: 'GET' });
+    pingMs = Date.now() - t;
+  } catch {
+    pingMs = 0;
+  }
+
+  // 2) Single chat probe — ok iff choices present.
+  let chatMs = 0;
+  let ok = 0;
+  let error = '';
+  try {
+    const t = Date.now();
+    const resp = await client.post(PROBE_CHAT_ENDPOINT, {
+      model: account.defaultModel || 'GLM-5.1',
+      max_tokens: 1,
+      stream: false,
+      messages: [{ role: 'user', content: '.' }],
+    });
+    chatMs = Date.now() - t;
+    ok = Array.isArray(resp?.choices) && resp.choices.length > 0 ? 1 : 0;
+    if (!ok) error = 'empty response (no choices)';
+  } catch (e) {
+    ok = 0;
+    error = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  }
+
+  await store.recordAvailabilitySample(ok, chatMs, pingMs, error);
+}
+
 export default {
   /** Scheduled (cron) entrypoint. */
   async scheduled(
-    _event: ScheduledEvent,
+    event: ScheduledEvent,
     env: CronEnv,
     _ctx: ExecutionContext,
   ): Promise<void> {
-    await runKeepalive(env);
+    // Two cron triggers: the 1-min one runs the availability probe; the 10-min
+    // one runs keepalive. (Cloudflare fires once per matching cron; event.cron
+    // identifies which fired.)
+    if (event.cron === '* * * * *') {
+      await runAvailabilityProbe(env);
+    } else {
+      await runKeepalive(env);
+    }
   },
 
   /** Trivial health-check fetch handler. Keeps the Worker deployable/invokeable. */

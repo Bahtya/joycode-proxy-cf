@@ -71,6 +71,22 @@ export interface Stats {
   }[];
 }
 
+export interface AvailabilitySample {
+  ts: string;
+  ok: number;
+  chat_ms: number;
+  ping_ms: number;
+  error: string;
+}
+export interface Availability {
+  samples: AvailabilitySample[];
+  avg_chat_ms: number;
+  avg_ping_ms: number;
+  last?: AvailabilitySample | null;
+  green: number;
+  frames: number;
+}
+
 export interface Settings {
   [key: string]: string;
 }
@@ -201,6 +217,7 @@ export const api = {
   listModels: () => request<{ models: ModelInfo[] }>('/api/models').then(r => r.models),
   listUpstreamModels: () => request<{ models: ModelInfo[] }>('/api/upstream-models').then(r => r.models),
   getStats: () => request<Stats>('/api/stats'),
+  getAvailability: () => request<Availability>('/api/availability'),
   getSettings: () => request<{ settings: Settings }>('/api/settings').then(r => r.settings),
   updateSettings: (data: Settings) =>
     request<{ ok: boolean }>('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),

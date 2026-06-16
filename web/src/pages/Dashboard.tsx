@@ -9,7 +9,7 @@ import {
   LayoutDashboard, Flame, TrendingUp, Loader2, Globe,
 } from "lucide-react"
 import { api, accountDisplayName } from "@/api"
-import type { Stats, Account } from "@/api"
+import type { Stats, Account, Availability, AvailabilitySample } from "@/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -43,6 +43,7 @@ const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<Stats | null>(null)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
+  const [avail, setAvail] = useState<Availability | null>(null)
 
   const fetchData = async () => {
     setLoading(true)
@@ -63,6 +64,16 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     fetchData()
+  }, [])
+
+  // Availability card polls every 60s (the cron writes 1 sample/min).
+  useEffect(() => {
+    let active = true
+    const load = () =>
+      api.getAvailability().then((d) => { if (active) setAvail(d) }).catch(() => {})
+    load()
+    const id = setInterval(load, 60000)
+    return () => { active = false; clearInterval(id) }
   }, [])
 
   if (loading) {
@@ -157,6 +168,14 @@ const Dashboard: React.FC = () => {
 
   const noRequests = stats.total_requests === 0 && (stats.all_time?.total_requests ?? 0) === 0
 
+  // Availability strip: pad samples to 60 frames (left = oldest). Missing slots = gray.
+  const AVAIL_FRAMES = 60
+  const availFrames: (AvailabilitySample | null)[] = avail
+    ? [...Array(Math.max(0, AVAIL_FRAMES - avail.samples.length)).fill(null), ...avail.samples].slice(-AVAIL_FRAMES)
+    : Array(AVAIL_FRAMES).fill(null)
+  const greenCount = availFrames.filter((f) => f?.ok === 1).length
+  const availRate = Math.round((greenCount / AVAIL_FRAMES) * 100)
+
   return (
     <div className="space-y-4">
       {/* Banner */}
@@ -203,6 +222,46 @@ const Dashboard: React.FC = () => {
                 className="border-0 bg-white/10 py-2"
               />
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 上游可用性 */}
+      <Card className="py-4">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-1.5"><Activity className="size-4" /> 上游可用性(近 60 分钟)</span>
+            <Badge variant={availRate >= 95 ? "default" : availRate >= 70 ? "secondary" : "destructive"}>{availRate}%</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-end gap-[2px] h-10">
+            {availFrames.map((f, i) => (
+              <div
+                key={i}
+                title={f ? `${f.ts} · ${f.ok ? "正常" : "异常"} · chat ${f.chat_ms}ms · ping ${f.ping_ms}ms` : "无数据"}
+                className={`flex-1 min-w-[3px] rounded-sm ${f ? (f.ok ? "bg-emerald-500" : "bg-red-500") : "bg-muted-foreground/20"}`}
+                style={{ height: f ? "100%" : "40%" }}
+              />
+            ))}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <StatisticCard
+              label="对话延迟"
+              value={avail && avail.last ? fmtLatency(avail.last.chat_ms) : "-"}
+              icon={<Zap className="size-4 text-muted-foreground" />}
+            />
+            <StatisticCard
+              label="端点 ping"
+              value={avail && avail.last ? fmtLatency(avail.last.ping_ms) : "-"}
+              icon={<Activity className="size-4 text-muted-foreground" />}
+            />
+            <StatisticCard
+              label="可用率"
+              value={<span className={availRate >= 95 ? "text-emerald-600" : "text-red-500"}>{availRate}%</span>}
+              sub={`绿 ${greenCount}/${AVAIL_FRAMES}`}
+              icon={<CheckCircle2 className={`size-4 ${availRate >= 95 ? "text-emerald-600" : "text-red-500"}`} />}
+            />
           </div>
         </CardContent>
       </Card>

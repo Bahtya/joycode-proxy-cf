@@ -78,11 +78,12 @@ export const onRequest: PagesFunction<Env, string, V1Data> = async ({ request, e
 
   // Pages Functions: `data` is the shared bag threaded through the subtree.
   data.account = account;
-  // Identify the calling client from its User-Agent once here, and stash the
-  // (truncated) raw UA too, so handlers record both on the request log.
+  // Identify the calling client: prefer an explicit `app`/`client` query param
+  // (apps like Hermes can self-identify via default_query), else infer from UA.
   const ua = request.headers.get('user-agent');
-  const path = new URL(request.url).pathname;
-  data.client = detectClient(ua, path);
+  const url = new URL(request.url);
+  const appHint = url.searchParams.get('app') ?? url.searchParams.get('client') ?? null;
+  data.client = detectClient(ua, url.pathname, appHint);
   data.userAgent = truncateUA(ua);
   return next();
 };
