@@ -17,7 +17,9 @@ import { api, accountDisplayName } from '@/api';
 import type { Account, DiagnoseResult, DiagStep } from '@/api';
 
 interface Props {
-  account: Account;
+  // account may briefly be null (Accounts clears diagTarget on close while Radix
+  // keeps the content mounted for the exit animation) — guard all uses.
+  account: Account | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDone?: () => void;
@@ -72,6 +74,7 @@ export function AccountDiagnoseDialog({ account, open, onOpenChange, onDone }: P
   const [running, setRunning] = useState(false);
 
   const run = async () => {
+    if (!account) return;
     setRunning(true);
     setResult(null);
     try {
@@ -114,7 +117,7 @@ export function AccountDiagnoseDialog({ account, open, onOpenChange, onDone }: P
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>账号诊断 — {accountDisplayName(account)}</DialogTitle>
+          <DialogTitle>账号诊断 — {account ? accountDisplayName(account) : ''}</DialogTitle>
           <DialogDescription>验证凭证、模型列表与上游聊天链路（每项约产生一次上游请求）</DialogDescription>
         </DialogHeader>
 

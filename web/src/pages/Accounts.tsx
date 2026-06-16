@@ -711,7 +711,7 @@ const Accounts: React.FC = () => {
         </AlertDialog>
 
         <AccountDiagnoseDialog
-          account={diagTarget!}
+          account={diagTarget}
           open={!!diagTarget}
           onOpenChange={(o) => { if (!o) setDiagTarget(null); }}
           onDone={fetchAccounts}
