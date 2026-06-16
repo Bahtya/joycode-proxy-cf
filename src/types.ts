@@ -56,6 +56,7 @@ export interface RequestLogRow {
   model: string;
   endpoint: string;
   client: string;
+  user_agent: string;
   stream: number;
   status_code: number;
   latency_ms: number;

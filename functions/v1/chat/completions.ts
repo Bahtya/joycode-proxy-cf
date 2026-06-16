@@ -111,7 +111,7 @@ async function handleNonStream(
   const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
   if (enableLogging) {
     waitUntil(
-      store.logRequest(makeLog(account.userId, model, '/v1/chat/completions', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? ''))
+      store.logRequest(makeLog(account.userId, model, '/v1/chat/completions', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? ''))
     );
   }
 
@@ -163,7 +163,7 @@ async function handleStream(
     });
     waitUntil(
       store.logRequest(
-        makeLog(account.userId, model, '/v1/chat/completions', true, 502, started, msg, 0, 0, ctx.data.client ?? '')
+        makeLog(account.userId, model, '/v1/chat/completions', true, 502, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '')
       )
     );
     return new Response(errorStream, { headers: SSE_HEADERS });
@@ -220,7 +220,7 @@ async function handleStream(
       const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
       if (enableLogging) {
         await store.logRequest(
-          makeLog(account.userId, model, '/v1/chat/completions', true, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '')
+          makeLog(account.userId, model, '/v1/chat/completions', true, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '')
         );
       }
     })()
@@ -266,13 +266,15 @@ function makeLog(
   errorMessage: string,
   inputTokens: number,
   outputTokens: number,
-  client: string
+  client: string,
+  userAgent: string
 ): RequestLogRow {
   return {
     api_key: apiKey,
     model,
     endpoint,
     client,
+    user_agent: userAgent,
     stream: stream ? 1 : 0,
     status_code: statusCode,
     latency_ms: Date.now() - started,

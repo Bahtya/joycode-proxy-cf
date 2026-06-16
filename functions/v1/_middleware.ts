@@ -12,7 +12,7 @@
 import type { Env } from '../../src/types';
 import type { Account } from '../../src/types';
 import { resolveAccount } from '../../src/proxy/resolve';
-import { detectClient } from '../../src/proxy/client';
+import { detectClient, truncateUA } from '../../src/proxy/client';
 
 /**
  * Shared data bag populated by this middleware for /v1/* handlers.
@@ -23,6 +23,7 @@ export type V1Data = {
   account?: Account;
   settings?: Record<string, string>;
   client?: string;
+  userAgent?: string;
   [k: string]: unknown;
 };
 
@@ -77,8 +78,11 @@ export const onRequest: PagesFunction<Env, string, V1Data> = async ({ request, e
 
   // Pages Functions: `data` is the shared bag threaded through the subtree.
   data.account = account;
-  // Identify the calling client (Claude Code / Codex / Cursor / ...) from its
-  // User-Agent once here, so the /v1/* handlers can record it on the request log.
-  data.client = detectClient(request.headers.get('user-agent'), new URL(request.url).pathname);
+  // Identify the calling client from its User-Agent once here, and stash the
+  // (truncated) raw UA too, so handlers record both on the request log.
+  const ua = request.headers.get('user-agent');
+  const path = new URL(request.url).pathname;
+  data.client = detectClient(ua, path);
+  data.userAgent = truncateUA(ua);
   return next();
 };

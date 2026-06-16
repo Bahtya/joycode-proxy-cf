@@ -46,6 +46,13 @@ export function detectClient(userAgent: string | null, endpoint = ''): string {
     if (lower.includes(needle)) return name;
   }
 
+  // 1b. Claude Code ships as a Bun-compiled binary whose UA is the runtime's
+  //     "Bun/<ver>" (verified from the local binary; there is no "claude-cli"
+  //     UA). It is the dominant Bun+Anthropic client, so a Bun runtime UA on
+  //     /v1/messages is treated as Claude Code. The raw UA is stored separately
+  //     so this heuristic can be refined from observed data.
+  if (/^bun\//i.test(ua) && endpoint.includes('/v1/messages')) return 'Claude Code';
+
   // 2. Leading product token (e.g. "claude-cli", "Cursor", "aider") if it isn't
   //    generic HTTP-library noise.
   if (ua !== '') {
@@ -59,4 +66,12 @@ export function detectClient(userAgent: string | null, endpoint = ''): string {
   if (endpoint.includes('/v1/messages')) return 'Anthropic';
   if (endpoint.includes('/v1/chat')) return 'OpenAI';
   return '其他';
+}
+
+/**
+ * Truncate a raw User-Agent for storage (defends against pathologically large
+ * UAs bloating request_logs). 256 chars is ample for any real client UA.
+ */
+export function truncateUA(userAgent: string | null): string {
+  return (userAgent ?? '').trim().slice(0, 256);
 }
