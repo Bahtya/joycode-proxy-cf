@@ -32,7 +32,7 @@ export type V1Data = {
  * reads ONCE per request, memoized on the shared data bag so handlers reusing ctx
  * don't re-query D1. Returns a key→value map (missing keys are absent).
  */
-const REQ_SETTING_KEYS = ['default_model', 'enable_request_logging'];
+const REQ_SETTING_KEYS = ['default_model', 'enable_request_logging', 'max_retries'];
 export async function ensureSettings(ctx: { env: Env; data: V1Data }): Promise<Record<string, string>> {
   if (!ctx.data.settings) {
     const { results } = await ctx.env.DB.prepare(

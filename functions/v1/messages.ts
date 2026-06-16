@@ -38,6 +38,7 @@ import { createStore } from '../../src/store/d1';
 import { getSetting } from '../../src/store/settings';
 import { readJson, jsonError } from '../../src/util/http';
 import { createJoyClient } from '../../src/joycode/client';
+import { withRetry, parseRetries } from '../../src/proxy/retry';
 import { msgId, tooluId } from '../../src/util/id';
 import {
   translateRequest,
@@ -115,13 +116,15 @@ async function handleNonStream(
 ): Promise<Response> {
   const { env, waitUntil } = ctx;
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
-  const systemDefault = (await ensureSettings(ctx))['default_model'] ?? '';
+  const settings = await ensureSettings(ctx);
+  const systemDefault = settings['default_model'] ?? '';
+  const maxRetries = parseRetries(settings['max_retries']);
 
   const jcBody = translateRequest(req, account.defaultModel ?? '', systemDefault);
 
   let jcResp: Record<string, unknown>;
   try {
-    jcResp = await client.post(CHAT_ENDPOINT, jcBody);
+    jcResp = await withRetry(() => client.post(CHAT_ENDPOINT, jcBody), maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '');
@@ -193,14 +196,16 @@ async function handleStream(
 ): Promise<Response> {
   const { env, waitUntil } = ctx;
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
-  const systemDefault = (await ensureSettings(ctx))['default_model'] ?? '';
+  const settings = await ensureSettings(ctx);
+  const systemDefault = settings['default_model'] ?? '';
+  const maxRetries = parseRetries(settings['max_retries']);
 
   const jcBody = translateRequest(req, account.defaultModel ?? '', systemDefault);
   jcBody['stream'] = true;
 
   let upstream: Response;
   try {
-    upstream = await client.postStream(CHAT_ENDPOINT, jcBody);
+    upstream = await withRetry(() => client.postStream(CHAT_ENDPOINT, jcBody), maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     waitUntil(
