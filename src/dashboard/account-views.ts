@@ -3,6 +3,7 @@
 import type { Env } from '../types';
 import { createJoyClient } from '../joycode/client';
 import { getAllTimeTotals } from '../store/dashboard';
+import { tzMin } from '../util/tz';
 
 export function clientFor(env: Env, account: { ptKey: string; userId: string }) {
   return createJoyClient({
@@ -15,7 +16,7 @@ export function clientFor(env: Env, account: { ptKey: string; userId: string }) 
 }
 
 /** GET /api/accounts/<userId>/stats — mirrors GetAccountStats (store.go:1154-1221). */
-export async function accountStatsResponse(env: Env, userId: string): Promise<Response> {
+export async function accountStatsResponse(env: Env, userId: string, off: number = 8): Promise<Response> {
   const db = env.DB;
   const tf = "created_at >= datetime('now', '-24 hours')";
 
@@ -57,7 +58,7 @@ export async function accountStatsResponse(env: Env, userId: string): Promise<Re
 
   const hourly = await db
     .prepare(
-      `SELECT strftime('%m-%d %H', created_at) AS hour,
+      `SELECT strftime('%m-%d %H', created_at, '${tzMin(off)}') AS hour,
               COUNT(*) AS count,
               COALESCE(SUM(input_tokens), 0) AS input_tokens,
               COALESCE(SUM(output_tokens), 0) AS output_tokens,

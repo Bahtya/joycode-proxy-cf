@@ -146,6 +146,20 @@ const FIELD_GROUPS: { title: string; fields: FieldConfig[] }[] = [
       },
     ],
   },
+  {
+    title: '区域与显示',
+    fields: [
+      {
+        key: 'tz_offset',
+        label: '时区偏移',
+        tooltip: '相对 UTC 的小时偏移,默认 8(东八区/UTC+8)。统一影响仪表盘「今日」起算点、24 小时趋势图的小时桶、以及时间戳显示。支持小数(如 5.5)',
+        placeholder: '8',
+        type: 'number',
+        suffix: '小时',
+        tag: '已生效',
+      },
+    ],
+  },
 ];
 
 // Form values can be string, number, or boolean (matching the old AntD form behavior).

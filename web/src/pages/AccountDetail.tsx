@@ -10,6 +10,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area,
 } from 'recharts';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTz } from '@/lib/tz';
 import { api, accountDisplayName } from '@/api';
 import type { Account, AccountStats, ModelInfo, RequestLog } from '@/api';
 import SvgClaudeCode from '@/components/ClaudeCodeIcon';
@@ -81,13 +82,7 @@ const StatusBadge = ({ code }: { code: number }) => {
   return <Badge variant="destructive">{code}</Badge>;
 };
 
-const formatTime = (t: string) => {
-  if (!t) return '-';
-  const d = new Date(t + (t.includes('Z') || t.includes('+') ? '' : 'Z'));
-  if (isNaN(d.getTime())) return t;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-};
+// Timestamps render via useTz().formatTz (offset-aware) now.
 
 const formatLatency = (ms: number) => {
   if (ms < 1000) return `${ms}ms`;
@@ -146,6 +141,7 @@ const AccountDetail: React.FC = () => {
   const [logs, setLogs] = useState<RequestLog[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const { off, formatTz } = useTz();
   const [modelLoading, setModelLoading] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
   const [renewing, setRenewing] = useState(false);
@@ -561,13 +557,13 @@ const AccountDetail: React.FC = () => {
           const hourlyChartData: { label: string; count: number; input_tokens: number; output_tokens: number; errors: number }[] = [];
           for (let i = 23; i >= 0; i--) {
             const d = new Date(now.getTime() - i * 3600000);
-            // Key must match the backend's UTC hour bucket (strftime on UTC-stored
-            // created_at); use UTC components so the join hits the right bucket.
-            // Label is the user's local wall-clock hour for that same instant.
-            const key = `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')} ${String(d.getUTCHours()).padStart(2, '0')}`;
+            // Shift to configured TZ; UTC components of the shifted instant are
+            // the local components, matching the backend's strftime(...,'+off') bucket.
+            const ld = new Date(d.getTime() + off * 3600000);
+            const key = `${String(ld.getUTCMonth() + 1).padStart(2, '0')}-${String(ld.getUTCDate()).padStart(2, '0')} ${String(ld.getUTCHours()).padStart(2, '0')}`;
             const entry = hMap.get(key);
             hourlyChartData.push({
-              label: `${String(d.getHours()).padStart(2, '0')}:00`,
+              label: `${String(ld.getUTCHours()).padStart(2, '0')}:00`,
               count: entry?.count ?? 0,
               input_tokens: entry?.input_tokens ?? 0,
               output_tokens: entry?.output_tokens ?? 0,
@@ -722,7 +718,7 @@ const AccountDetail: React.FC = () => {
                                 onClick={() => toggleRow(key)}
                                 data-state={isOpen ? 'selected' : undefined}
                               >
-                                <TableCell className="font-mono text-xs">{formatTime(record.created_at)}</TableCell>
+                                <TableCell className="font-mono text-xs">{formatTz(record.created_at)}</TableCell>
                                 <TableCell><code className="rounded bg-muted px-1 py-0.5 text-xs">{record.endpoint}</code></TableCell>
                                 <TableCell className="max-w-[140px] truncate text-xs">{record.model || <span className="text-muted-foreground">-</span>}</TableCell>
                                 <TableCell>
@@ -751,7 +747,7 @@ const AccountDetail: React.FC = () => {
                                         <span className="text-muted-foreground">请求 ID</span>
                                         <code className="rounded bg-muted px-1 py-0.5">{record.id}</code>
                                         <span className="text-muted-foreground">时间</span>
-                                        <span>{formatTime(record.created_at)}</span>
+                                        <span>{formatTz(record.created_at)}</span>
                                         <span className="text-muted-foreground">端点</span>
                                         <code className="rounded bg-muted px-1 py-0.5">{record.endpoint}</code>
                                         <span className="text-muted-foreground">模型</span>

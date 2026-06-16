@@ -36,6 +36,7 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
     'enable_request_logging',
     'log_retention_days',
     'selectable_models',
+    'tz_offset',
   ]);
   const stmts: D1PreparedStatement[] = [];
   for (const [key, value] of Object.entries(body)) {
@@ -52,6 +53,13 @@ export const onRequestPut: PagesFunction<Env> = async ({ request, env }) => {
       } catch {
         return Response.json({ detail: 'selectable_models must be valid JSON' }, { status: 400 });
       }
+    }
+    if (key === 'tz_offset') {
+      const n = Number(strVal);
+      if (!Number.isFinite(n) || n < -12 || n > 14) {
+        return Response.json({ detail: 'tz_offset must be a number of hours between -12 and 14' }, { status: 400 });
+      }
+      strVal = String(n);
     }
     stmts.push(
       env.DB

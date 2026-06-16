@@ -6,6 +6,8 @@
 import type { Env, Account } from '../../../src/types';
 import { createStore } from '../../../src/store/d1';
 import { getAllTimeTotals } from '../../../src/store/dashboard';
+import { getIntSetting } from '../../../src/store/settings';
+import { todayStartExpr } from '../../../src/util/tz';
 import { createJoyClient } from '../../../src/joycode/client';
 import { readJson, jsonError, notFound } from '../../../src/util/http';
 
@@ -36,18 +38,17 @@ interface AccountInfo {
  *
  * Done inline here rather than in src/store so we don't touch the foundation.
  */
-async function toAccountInfo(db: D1Database, a: Account): Promise<AccountInfo> {
+async function toAccountInfo(db: D1Database, a: Account, off: number = 8): Promise<AccountInfo> {
   const key = a.userId;
   // all-time = rolled-up stats_daily + live-window raw (disjoint; see
-  // getAllTimeTotals) — replaces an unscoped request_logs scan that would
-  // under-count once old raw days are rolled up + deleted. today stays raw.
+  // getAllTimeTotals). today stays raw, offset-aware (local midnight).
   const [allTotals, todayRow] = await Promise.all([
     getAllTimeTotals(db, key),
     db
       .prepare(
         `SELECT COUNT(*) AS req, COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
          FROM request_logs
-         WHERE api_key = ? AND created_at >= datetime('now', 'start of day')`
+         WHERE api_key = ? AND created_at >= ${todayStartExpr(off)}`
       )
       .bind(key)
       .first<{ req: number; tokens: number }>(),
@@ -109,8 +110,9 @@ async function resolveFromPtKey(
 // --- GET /api/accounts ---
 export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
+  const off = await getIntSetting(env.DB, 'tz_offset', 8);
   const accounts = await store.listAccounts();
-  const infos = await Promise.all(accounts.map((a) => toAccountInfo(env.DB, a)));
+  const infos = await Promise.all(accounts.map((a) => toAccountInfo(env.DB, a, off)));
   return Response.json({ accounts: infos });
 };
 

@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
+import { TzProvider } from "@/lib/tz";
 
 const COLLAPSED_KEY = "joycode_sider_collapsed";
 
@@ -40,6 +41,7 @@ export default function MainLayout() {
   };
 
   return (
+    <TzProvider>
     <SidebarProvider defaultOpen={open} onOpenChange={handleOpenChange}>
       <AppSidebar />
       <SidebarInset>
@@ -53,5 +55,6 @@ export default function MainLayout() {
         </main>
       </SidebarInset>
     </SidebarProvider>
+    </TzProvider>
   );
 }

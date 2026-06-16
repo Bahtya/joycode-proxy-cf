@@ -7,6 +7,7 @@ const DEFAULTS: Partial<Record<SettingKey, string>> = {
   max_connections: '20',
   log_retention_days: '30',
   enable_request_logging: 'true',
+  tz_offset: '8',
 };
 
 export async function getSetting(db: D1Database, key: SettingKey | string): Promise<string | null> {

@@ -113,9 +113,10 @@ async function runKeepalive(env: CronEnv): Promise<void> {
   // Retention reads the admin setting (log_retention_days); previously this used
   // a vestigial, never-bound env var that always defaulted to 30, so the
   // dashboard's retention field had no effect.
-  await store.rollupLogs(RAW_LIVE_WINDOW_DAYS);
+  const tzOff = await getIntSetting(env.DB, 'tz_offset', 8);
+  await store.rollupLogs(RAW_LIVE_WINDOW_DAYS, tzOff);
   const retentionDays = await getIntSetting(env.DB, 'log_retention_days', 30);
-  await store.cleanupOldLogs(retentionDays > 0 ? retentionDays : 30);
+  await store.cleanupOldLogs(retentionDays > 0 ? retentionDays : 30, tzOff);
 }
 
 const PROBE_CHAT_ENDPOINT = '/api/saas/openai/v1/chat/completions';

@@ -3,13 +3,14 @@
 // (GetStats, GetAllTimeTotals, GetHourlyStats, GetRecentLogs, GetRecentErrors,
 //  GetAccountStats, GetAccountLogs, FillAccountStats).
 //
-// IMPORTANT: the Go SQLite schema stored timestamps in localtime and filtered with
-// `date(created_at, 'localtime') = date('now', 'localtime')`. The D1 port stores
-// UTC timestamps (see migrations/0001_init.sql: `DEFAULT (datetime('now'))`), so
-// every "today" / "-24 hours" filter is rewritten against UTC. This keeps the
-// dashboard consistent with what the proxy actually writes here.
+// IMPORTANT: storage is UTC (created_at = datetime('now')); day/hour boundaries
+// are computed in the configured local TZ (tz_offset setting, default UTC+8) by
+// shifting via SQLite minute modifiers (see src/util/tz.ts). Rolling windows
+// (-24h, retention) are offset-independent; only "today" and the hourly buckets
+// shift.
 
 import type { RequestLogRow } from '../types';
+import { todayStartExpr, tzMin } from '../util/tz';
 
 export interface ModelCount {
   model: string;
@@ -96,10 +97,9 @@ export interface DashboardLog {
   created_at: string;
 }
 
-// "Today" filter in UTC (D1 stores datetime('now') = UTC). Sargable range form so
-// idx_request_logs_created(created_at) can be used (the date()= wrapper was not). (P1)
-const TODAY = "created_at >= datetime('now', 'start of day')";
-// "Last 24 hours" window in UTC.
+// "Today" boundary is offset-aware (local midnight in the configured TZ), built
+// per-call from the offset via todayStartExpr. LAST_24H is a rolling window
+// (offset-independent). Storage is UTC; only this boundary shifts.
 const LAST_24H = "created_at >= datetime('now', '-24 hours')";
 
 /** Map a stored RequestLogRow (stream as 0/1) to the frontend's boolean-stream shape. */
@@ -136,12 +136,14 @@ async function safeFirst<T>(p: Promise<{ results?: T[] } | T | null>): Promise<T
  */
 export async function getStats(
   db: D1Database,
-  opts: { userId?: string; days?: number } = {}
+  opts: { userId?: string; days?: number } = {},
+  off: number = 8,
 ): Promise<GlobalStats> {
   const scoped = !!opts.userId;
   const scope = scoped ? `AND api_key = ?` : '';
   const binds: string[] = scoped ? [opts.userId as string] : [];
-  const todayFilter = `WHERE ${TODAY} ${scope}`;
+  const today = `created_at >= ${todayStartExpr(off)}`;
+  const todayFilter = `WHERE ${today} ${scope}`;
   const bind = <T>(stmt: D1PreparedStatement): D1PreparedStatement => (binds.length ? stmt.bind(...binds) : stmt);
 
   // by_account is global-only and runs its 2 sub-queries as one unit.
@@ -153,7 +155,7 @@ export async function getStats(
     const validKeys = new Set(accts.map((a) => a.user_id));
     const nameMap = new Map(accts.map((a) => [a.user_id, a]));
     const { results: raw } = await db
-      .prepare(`SELECT api_key AS user_id, COUNT(*) AS count FROM request_logs WHERE ${TODAY} GROUP BY api_key ORDER BY count DESC`)
+      .prepare(`SELECT api_key AS user_id, COUNT(*) AS count FROM request_logs WHERE ${today} GROUP BY api_key ORDER BY count DESC`)
       .all<{ user_id: string; count: number }>();
     const out: AccountCount[] = [];
     let other = 0;
@@ -201,7 +203,7 @@ export async function getStats(
     ).all<ClientCount>(),
     byAccount(),
     getAllTimeTotals(db, opts.userId),
-    getHourlyStats(db, opts.userId),
+    getHourlyStats(db, opts.userId, off),
   ]);
 
   return {
@@ -263,10 +265,10 @@ export async function getAllTimeTotals(db: D1Database, userId?: string): Promise
 }
 
 /** Hourly bucket counts for the last 24h (store.GetHourlyStats), optionally scoped. */
-export async function getHourlyStats(db: D1Database, userId?: string): Promise<HourlyData[]> {
+export async function getHourlyStats(db: D1Database, userId?: string, off: number = 8): Promise<HourlyData[]> {
   const scope = userId ? `AND api_key = ?` : '';
   const stmt = db.prepare(
-    `SELECT strftime('%m-%d %H', created_at) AS hour,
+    `SELECT strftime('%m-%d %H', created_at, '${tzMin(off)}') AS hour,
             COUNT(*) AS count,
             COALESCE(SUM(input_tokens), 0) AS input_tokens,
             COALESCE(SUM(output_tokens), 0) AS output_tokens,

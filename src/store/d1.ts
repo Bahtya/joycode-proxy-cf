@@ -3,6 +3,7 @@
 import type { Account, AccountRow, RequestLogRow, KeepaliveStatusRow, AvailabilitySample } from '../types';
 import { encrypt, decrypt } from './crypto';
 import { hexId } from '../util/id';
+import { tzMin } from '../util/tz';
 
 /**
  * Raw per-request logs are kept for this many days for fine-grained views
@@ -239,15 +240,16 @@ export class Store {
       .run();
   }
 
-  async cleanupOldLogs(retentionDays: number): Promise<void> {
-    // Prune rolled-up daily stats older than retention. Raw request_logs are
-    // already bounded to the live window by rollupLogs; the request_logs delete
-    // here is a safety net for when the cron is down. Atomic via batch.
+  async cleanupOldLogs(retentionDays: number, off: number = 8): Promise<void> {
+    // Prune rolled-up daily stats older than retention (offset-aware local day).
+    // Raw request_logs are bounded to the live window by rollupLogs; this
+    // request_logs delete is a safety net (a point-in-time cutoff, TZ-independent).
+    const m = tzMin(off);
     await this.db.batch([
       this.db
         .prepare("DELETE FROM request_logs WHERE datetime(created_at) < datetime('now', ?)")
         .bind(`-${retentionDays} days`),
-      this.db.prepare("DELETE FROM stats_daily WHERE day < date('now', ?)").bind(`-${retentionDays} days`),
+      this.db.prepare(`DELETE FROM stats_daily WHERE day < date('now', '${m}', ?)`).bind(`-${retentionDays} days`),
     ]);
   }
 
@@ -261,9 +263,11 @@ export class Store {
    * and overwrites; once a day's raw rows are deleted they're never reprocessed.
    * Each day's aggregate + delete runs as one atomic D1 batch.
    */
-  async rollupLogs(liveWindowDays: number): Promise<void> {
+  async rollupLogs(liveWindowDays: number, off: number = 8): Promise<void> {
+    const m = tzMin(off);
+    const dayExpr = `date(created_at, '${m}')`;
     const { results } = await this.db
-      .prepare("SELECT DISTINCT date(created_at) AS d FROM request_logs WHERE date(created_at) < date('now', ?)")
+      .prepare(`SELECT DISTINCT ${dayExpr} AS d FROM request_logs WHERE ${dayExpr} < date('now', '${m}', ?)`)
       .bind(`-${liveWindowDays} days`)
       .all<{ d: string }>();
     for (const row of results ?? []) {
@@ -273,10 +277,10 @@ export class Store {
         this.db
           .prepare(
             `INSERT INTO stats_daily (day, api_key, model, request_count, input_tokens, output_tokens, error_count)
-             SELECT date(created_at), api_key, model, COUNT(*),
+             SELECT ${dayExpr}, api_key, model, COUNT(*),
                     COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
                     SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END)
-             FROM request_logs WHERE date(created_at) = ?
+             FROM request_logs WHERE ${dayExpr} = ?
              GROUP BY api_key, model
              ON CONFLICT(day, api_key, model) DO UPDATE SET
                request_count = excluded.request_count,
@@ -285,7 +289,7 @@ export class Store {
                error_count = excluded.error_count`,
           )
           .bind(d),
-        this.db.prepare('DELETE FROM request_logs WHERE date(created_at) = ?').bind(d),
+        this.db.prepare(`DELETE FROM request_logs WHERE ${dayExpr} = ?`).bind(d),
       ]);
     }
   }

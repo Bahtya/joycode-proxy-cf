@@ -9,6 +9,7 @@ import {
   LayoutDashboard, Flame, TrendingUp, Loader2, Globe,
 } from "lucide-react"
 import { api, accountDisplayName } from "@/api"
+import { useTz } from "@/lib/tz"
 import type { Stats, Account, Availability, AvailabilitySample } from "@/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -44,6 +45,7 @@ const Dashboard: React.FC = () => {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [avail, setAvail] = useState<Availability | null>(null)
+  const { off } = useTz()
 
   const fetchData = async () => {
     setLoading(true)
@@ -149,13 +151,11 @@ const Dashboard: React.FC = () => {
   const hourlyChartData: { hour: string; label: string; requests: number; tokens: number; errors: number }[] = []
   for (let i = 23; i >= 0; i--) {
     const d = new Date(now.getTime() - i * 3600000)
-    // Key must match the backend's UTC hour bucket (strftime on UTC-stored
-    // created_at) — use UTC components so the join hits the right bucket. The
-    // label is the user's local wall-clock hour for that same instant. (Using
-    // local getHours() for the key shifted every bar by the TZ offset, so recent
-    // evening traffic showed under morning bars and evening bars read 0.)
-    const key = `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}`
-    const label = `${String(d.getHours()).padStart(2, "0")}:00`
+    // Shift to the configured TZ; the UTC components of the shifted instant ARE
+    // the local components, matching the backend's strftime(...,'+off') bucket.
+    const ld = new Date(d.getTime() + off * 3600000)
+    const key = `${String(ld.getUTCMonth() + 1).padStart(2, "0")}-${String(ld.getUTCDate()).padStart(2, "0")} ${String(ld.getUTCHours()).padStart(2, "0")}`
+    const label = `${String(ld.getUTCHours()).padStart(2, "0")}:00`
     const entry = hourlyMap.get(key)
     hourlyChartData.push({
       hour: key,

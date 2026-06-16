@@ -3,6 +3,7 @@
 // Response shape must match web/src/api.ts Stats interface.
 import type { Env } from '../../src/types';
 import { getStats } from '../../src/store/dashboard';
+import { getIntSetting } from '../../src/store/settings';
 
 export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const url = new URL(request.url);
@@ -10,6 +11,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ request, env }) => {
   const daysRaw = url.searchParams.get('days');
   const days = daysRaw && Number.isFinite(parseInt(daysRaw, 10)) ? parseInt(daysRaw, 10) : undefined;
 
-  const stats = await getStats(env.DB, { userId, days });
+  const off = await getIntSetting(env.DB, 'tz_offset', 8);
+  const stats = await getStats(env.DB, { userId, days }, off);
   return Response.json(stats);
 };
