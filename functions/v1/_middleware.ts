@@ -12,6 +12,7 @@
 import type { Env } from '../../src/types';
 import type { Account } from '../../src/types';
 import { resolveAccount } from '../../src/proxy/resolve';
+import { detectClient } from '../../src/proxy/client';
 
 /**
  * Shared data bag populated by this middleware for /v1/* handlers.
@@ -21,6 +22,7 @@ import { resolveAccount } from '../../src/proxy/resolve';
 export type V1Data = {
   account?: Account;
   settings?: Record<string, string>;
+  client?: string;
   [k: string]: unknown;
 };
 
@@ -75,5 +77,8 @@ export const onRequest: PagesFunction<Env, string, V1Data> = async ({ request, e
 
   // Pages Functions: `data` is the shared bag threaded through the subtree.
   data.account = account;
+  // Identify the calling client (Claude Code / Codex / Cursor / ...) from its
+  // User-Agent once here, so the /v1/* handlers can record it on the request log.
+  data.client = detectClient(request.headers.get('user-agent'), new URL(request.url).pathname);
   return next();
 };

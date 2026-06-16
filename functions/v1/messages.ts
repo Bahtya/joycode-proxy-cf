@@ -124,7 +124,7 @@ async function handleNonStream(
     jcResp = await client.post(CHAT_ENDPOINT, jcBody);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 500, started, msg, 0, 0);
+    const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 500, started, msg, 0, 0, ctx.data.client ?? '');
     waitUntil(maybeLog(env, store, log));
     if (isTimeoutError(msg)) {
       return jsonError(504, `上游服务响应超时，请稍后重试。原始错误: ${msg}`);
@@ -140,7 +140,7 @@ async function handleNonStream(
       const fr = (choice as Record<string, unknown>)['finish_reason'];
       if (fr === 'content_filter') {
         const msg = JSON.stringify(choice);
-        const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 400, started, msg, 0, 0);
+        const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 400, started, msg, 0, 0, ctx.data.client ?? '');
         waitUntil(maybeLog(env, store, log));
         return contentFilterError(msg);
       }
@@ -158,7 +158,7 @@ async function handleNonStream(
     outputTokens = numOr((usage as Record<string, unknown>)['completion_tokens']);
   }
 
-  const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 200, started, '', inputTokens, outputTokens);
+  const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '');
   waitUntil(maybeLog(env, store, log));
 
   return Response.json(resp);
@@ -204,7 +204,7 @@ async function handleStream(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     waitUntil(
-      maybeLog(env, store, makeLog(account.userId, req.model ?? '', '/v1/messages', true, 500, started, msg, 0, 0)),
+      maybeLog(env, store, makeLog(account.userId, req.model ?? '', '/v1/messages', true, 500, started, msg, 0, 0, ctx.data.client ?? '')),
     );
     if (isTimeoutError(msg)) {
       return jsonError(504, `上游服务响应超时，请稍后重试。原始错误: ${msg}`);
@@ -281,6 +281,7 @@ async function handleStream(
             drainOk ? '' : 'upstream stream error',
             inTk,
             outTk,
+            ctx.data.client ?? '',
           ),
         );
       }
@@ -632,11 +633,13 @@ function makeLog(
   errorMessage: string,
   inputTokens: number,
   outputTokens: number,
+  client: string,
 ): RequestLogRow {
   return {
     api_key: apiKey,
     model,
     endpoint,
+    client,
     stream: stream ? 1 : 0,
     status_code: statusCode,
     latency_ms: Date.now() - started,

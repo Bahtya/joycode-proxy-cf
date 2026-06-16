@@ -55,6 +55,7 @@ export interface Stats {
   success_count: number;
   by_model: { model: string; count: number }[];
   by_account: { user_id: string; nickname: string; remark: string; count: number }[];
+  by_client: { client: string; count: number }[];
   all_time: {
     total_requests: number;
     total_input_tokens: number;

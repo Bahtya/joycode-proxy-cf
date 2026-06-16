@@ -16,6 +16,11 @@ export interface ModelCount {
   count: number;
 }
 
+export interface ClientCount {
+  client: string;
+  count: number;
+}
+
 export interface AccountCount {
   user_id: string;
   nickname: string;
@@ -54,6 +59,7 @@ export interface GlobalStats {
   success_count: number;
   by_model: ModelCount[];
   by_account: AccountCount[];
+  by_client: ClientCount[];
   all_time: AllTimeTotals;
   hourly: HourlyData[];
 }
@@ -165,7 +171,7 @@ export async function getStats(
 
   // Collapse the 7 sequential scalar scans into ONE conditional-aggregation query and
   // run the independent queries in parallel. (P1)
-  const [agg, accountsCountRow, byModelRes, by_account, all_time, hourly] = await Promise.all([
+  const [agg, accountsCountRow, byModelRes, byClientRes, by_account, all_time, hourly] = await Promise.all([
     bind(
       db.prepare(
         `SELECT
@@ -188,6 +194,11 @@ export async function getStats(
         `SELECT model AS model, COUNT(*) AS count FROM request_logs ${todayFilter} AND model != '' GROUP BY model ORDER BY count DESC`
       )
     ).all<ModelCount>(),
+    bind(
+      db.prepare(
+        `SELECT client AS client, COUNT(*) AS count FROM request_logs ${todayFilter} AND client != '' GROUP BY client ORDER BY count DESC`
+      )
+    ).all<ClientCount>(),
     byAccount(),
     getAllTimeTotals(db, opts.userId),
     getHourlyStats(db, opts.userId),
@@ -203,6 +214,7 @@ export async function getStats(
     stream_count: agg?.stream_count ?? 0,
     success_count: agg?.success_count ?? 0,
     by_model: byModelRes.results ?? [],
+    by_client: byClientRes.results ?? [],
     by_account,
     all_time,
     hourly,

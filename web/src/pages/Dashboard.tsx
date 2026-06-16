@@ -2,11 +2,11 @@ import * as React from "react"
 import { useEffect, useState } from "react"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area,
+  AreaChart, Area, PieChart, Pie, Cell, Legend,
 } from "recharts"
 import {
   Zap, CheckCircle2, XCircle, Users, Activity, ArrowLeftRight,
-  LayoutDashboard, Flame, TrendingUp, Loader2,
+  LayoutDashboard, Flame, TrendingUp, Loader2, Globe,
 } from "lucide-react"
 import { api, accountDisplayName } from "@/api"
 import type { Stats, Account } from "@/api"
@@ -110,6 +110,23 @@ const Dashboard: React.FC = () => {
     name: accountDisplayName(a), value: a.count,
     pct: stats.total_requests > 0 ? Math.round((a.count / stats.total_requests) * 100) : 0,
   }))
+
+  // Client distribution for the pie chart; fold long tails (>6) into 其他.
+  const allClients = stats.by_client.map((c) => ({
+    name: c.client, value: c.count,
+    pct: stats.total_requests > 0 ? Math.round((c.count / stats.total_requests) * 100) : 0,
+  }))
+  const clientData =
+    allClients.length > 6
+      ? [
+          ...allClients.slice(0, 6),
+          {
+            name: "其他",
+            value: allClients.slice(6).reduce((s, c) => s + c.value, 0),
+            pct: allClients.slice(6).reduce((s, c) => s + c.pct, 0),
+          },
+        ]
+      : allClients
 
   // Build hourly chart data — fill gaps with zeros
   // Key format matches backend strftime('%m-%d %H') to avoid cross-day hour merging
@@ -420,6 +437,59 @@ const Dashboard: React.FC = () => {
                       <div className="flex shrink-0 items-center gap-1">
                         <span className="text-xs font-medium tabular-nums">{a.value.toLocaleString()}</span>
                         <span className="text-[11px] text-muted-foreground">{a.pct}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">暂无数据</div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* 客户端分布 */}
+        <Card className="py-4 lg:col-span-2">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-1.5 text-sm">
+              <Globe className="size-4" /> 客户端分布
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {clientData.length > 0 ? (
+              <div className="flex flex-col items-center gap-4 md:flex-row">
+                <div className="h-56 w-full md:flex-1">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={clientData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={2}
+                      >
+                        {clientData.map((_, i) => (
+                          <Cell key={i} fill={chartColor(i)} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(v: unknown) => formatRequests(v)} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="w-full space-y-1 md:w-56">
+                  {clientData.map((c, i) => (
+                    <div key={c.name} className="flex items-center justify-between border-b border-border/60 py-1.5 last:border-0">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <span className="size-2 shrink-0 rounded-full" style={{ background: chartColor(i) }} />
+                        <span className="truncate text-xs">{c.name}</span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <span className="text-xs font-medium tabular-nums">{c.value.toLocaleString()}</span>
+                        <span className="text-[11px] text-muted-foreground">{c.pct}%</span>
                       </div>
                     </div>
                   ))}
