@@ -8,6 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { APP_VERSION } from "@/version";
 
 type SiteHeaderProps = {
   healthy: boolean;
@@ -35,7 +36,10 @@ export function SiteHeader({
         {accountCount} 个账号在线
       </span>
 
-      <div className="ml-auto">
+      <div className="ml-auto flex items-center gap-3">
+        <span className="text-xs text-muted-foreground/70 tabular-nums">
+          v{APP_VERSION}
+        </span>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

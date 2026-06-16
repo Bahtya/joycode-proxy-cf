@@ -7,6 +7,7 @@ import { Lock, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { authApi, setToken } from "@/api";
+import { APP_VERSION } from "@/version";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,7 @@ const LoginPage = () => {
               JoyCode 代理
             </h3>
             <p className="text-sm text-muted-foreground">请输入 root 密码登录</p>
+            <p className="text-xs text-muted-foreground/60 mt-2">v{APP_VERSION}</p>
           </div>
 
           <Form {...form}>
