@@ -243,6 +243,11 @@ async function handleStream(
   let logFlushed = false;
   let terminalSent = false; // finish() emits the terminal sequence exactly once
   let hadStreamError = false; // true if the upstream stream errored mid-flight
+  // Set once finish_reason is seen: the terminal sequence has been sent and the
+  // client controller closed. We do NOT stop reading — OpenAI upstreams emit the
+  // final usage in a chunk AFTER finish_reason, so we keep draining only to
+  // capture that trailing usage (see the usage-capture + clientDone guard below).
+  let clientDone = false;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -357,11 +362,18 @@ async function handleStream(
               continue;
             }
 
-            // Capture usage whenever present (handler.go:309-320).
+            // Capture usage whenever present (handler.go:309-320). Runs for EVERY
+            // chunk — including the trailing usage-only chunk after finish_reason —
+            // so it MUST stay before the clientDone guard below.
             if (chunk.usage) {
               streamInTk = chunk.usage.prompt_tokens ?? streamInTk;
               streamOutTk = chunk.usage.completion_tokens ?? streamOutTk;
             }
+
+            // Terminal already sent (finish_reason seen): the client is fully
+            // served. Keep draining ONLY to capture the trailing usage chunk —
+            // skip all delta/finish processing.
+            if (clientDone) continue;
 
             const choices = chunk.choices;
             if (!choices || choices.length === 0) continue;
@@ -446,32 +458,49 @@ async function handleStream(
               } catch {
                 /* already closed */
               }
-              return;
+              // Do NOT return. The client already has its terminal sequence, but
+              // OpenAI upstreams send the final usage in a SEPARATE chunk AFTER
+              // finish_reason — returning here (as the Go port did) skips it and
+              // logs 0 tokens. Set clientDone and let the read loop drain the
+              // trailing chunk; usage is captured above, everything else is
+              // skipped by the clientDone guard. This mirrors the /v1/chat
+              // tee()+drain path that loses 0% of usage.
+              clientDone = true;
             }
           }
         }
         // Always synthesize a terminal sequence at EOF so the Anthropic SDK gets a
         // message_stop even when the upstream ended after deltas without a
-        // finish_reason (idempotent via terminalSent). (#1)
-        finish('end_turn', false);
+        // finish_reason (idempotent via terminalSent). (#1). Skip if we already
+        // finished via finish_reason (clientDone) — only the no-finish_reason case
+        // needs the synthesized terminal.
+        if (!clientDone) finish('end_turn', false);
       } catch (err) {
         // Upstream stream errored mid-flight (abort/timeout/truncation). Surface it
         // as an Anthropic error event AND a terminal sequence so the SDK completes
         // instead of hanging on a silent/truncated turn. (#4)
-        hadStreamError = true;
-        const errMsg = err instanceof Error ? err.message : String(err);
-        const isAbort = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
-        push(
-          encodeSSE('error', {
-            type: 'error',
-            error: { type: isAbort ? 'overloaded_error' : 'api_error', message: errMsg.slice(0, 500) },
-          }),
-        );
-        const errorStopReason = toolBlockStarted.size > 0 ? 'tool_use' : 'end_turn';
-        try {
-          finish(errorStopReason, true);
-        } catch {
-          /* best-effort */
+        //
+        // If a clean terminal was already delivered (finish_reason seen, we were
+        // only draining for the trailing usage chunk), a subsequent abort /
+        // client-disconnect is benign: the client already has its complete
+        // response. Don't emit a second error event or flip the log to 500 — just
+        // fall through to finally and log whatever usage we captured (status 200).
+        if (!terminalSent) {
+          hadStreamError = true;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          const isAbort = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+          push(
+            encodeSSE('error', {
+              type: 'error',
+              error: { type: isAbort ? 'overloaded_error' : 'api_error', message: errMsg.slice(0, 500) },
+            }),
+          );
+          const errorStopReason = toolBlockStarted.size > 0 ? 'tool_use' : 'end_turn';
+          try {
+            finish(errorStopReason, true);
+          } catch {
+            /* best-effort */
+          }
         }
       } finally {
         try {
@@ -488,7 +517,12 @@ async function handleStream(
         // events (finish_reason / clean EOF / scanner error).
         if (!logFlushed) {
           logFlushed = true;
-          flushUsageAndLog(env, store, account, model, started, streamInTk, streamOutTk, waitUntil, hadStreamError ? 500 : 200);
+          // If upstream still surfaced no usage chunk (rare after the drain fix),
+          // fall back to the same char/4 output estimate the client's
+          // message_delta uses, so a residual zero-usage stream logs a non-zero
+          // output. Input can't be estimated client-side and stays 0 in that case.
+          const logOutTk = streamOutTk > 0 ? streamOutTk : Math.trunc(totalOutput / 4);
+          flushUsageAndLog(env, store, account, model, started, streamInTk, logOutTk, waitUntil, hadStreamError ? 500 : 200);
         }
       }
     },

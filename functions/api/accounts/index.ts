@@ -49,7 +49,7 @@ async function toAccountInfo(db: D1Database, a: Account): Promise<AccountInfo> {
       .prepare(
         `SELECT COUNT(*) AS req, COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens
          FROM request_logs
-         WHERE api_key = ? AND date(created_at, 'localtime') = date('now', 'localtime')`
+         WHERE api_key = ? AND created_at >= datetime('now', 'start of day')`
       )
       .bind(key)
       .first<{ req: number; tokens: number }>(),
