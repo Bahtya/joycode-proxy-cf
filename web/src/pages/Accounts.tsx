@@ -38,6 +38,7 @@ import {
   KeyRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AccountDiagnoseDialog } from '@/components/account-diagnose-dialog';
 import {
   Table,
   TableHeader,
@@ -217,7 +218,7 @@ const Accounts: React.FC = () => {
     default_model: '',
     is_default: false,
   });
-  const [validating, setValidating] = useState<string | null>(null);
+  const [diagTarget, setDiagTarget] = useState<Account | null>(null);
   const [autoLogging, setAutoLogging] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [renameModalOpen, setRenameModalOpen] = useState(false);
@@ -324,22 +325,6 @@ const Accounts: React.FC = () => {
       fetchAccounts();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '更新 Token 失败');
-    }
-  };
-
-  const handleValidate = async (userId: string, displayName: string) => {
-    setValidating(userId);
-    try {
-      const result = await api.validateAccount(userId);
-      if (result.valid) {
-        toast.success(`账号「${displayName}」验证通过，凭证有效`);
-      } else {
-        toast.error(`账号「${displayName}」验证失败，凭证无效或已过期`);
-      }
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '验证请求失败');
-    } finally {
-      setValidating(null);
     }
   };
 
@@ -513,10 +498,9 @@ const Accounts: React.FC = () => {
                       key={record.user_id}
                       record={record}
                       isMobile={isMobile}
-                      validating={validating}
                       onRename={openRename}
                       onSetDefault={handleSetDefault}
-                      onValidate={handleValidate}
+                      onDiagnose={setDiagTarget}
                       onRequestRenew={setRenewTarget}
                       onRequestRemove={setRemoveTarget}
                     />
@@ -725,6 +709,13 @@ const Accounts: React.FC = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <AccountDiagnoseDialog
+          account={diagTarget!}
+          open={!!diagTarget}
+          onOpenChange={(o) => { if (!o) setDiagTarget(null); }}
+          onDone={fetchAccounts}
+        />
       </div>
     </TooltipProvider>
   );
@@ -733,10 +724,9 @@ const Accounts: React.FC = () => {
 interface SortableRowProps {
   record: Account;
   isMobile: boolean;
-  validating: string | null;
   onRename: (record: Account) => void;
   onSetDefault: (userId: string, displayName: string) => void;
-  onValidate: (userId: string, displayName: string) => void;
+  onDiagnose: (record: Account) => void;
   onRequestRenew: (record: Account) => void;
   onRequestRemove: (record: Account) => void;
 }
@@ -744,10 +734,9 @@ interface SortableRowProps {
 const SortableRow: React.FC<SortableRowProps> = ({
   record,
   isMobile,
-  validating,
   onRename,
   onSetDefault,
-  onValidate,
+  onDiagnose,
   onRequestRenew,
   onRequestRemove,
 }) => {
@@ -766,7 +755,6 @@ const SortableRow: React.FC<SortableRowProps> = ({
   const displayName = accountDisplayName(record);
   const claudeCmd = claudeCodeCmd(record.api_token, record.default_model || undefined);
   const cxCmd = codexCmd(record.api_token, record.default_model || undefined);
-  const isValidating = validating === record.user_id;
 
   const renderActions = () => {
     if (!isMobile) {
@@ -786,10 +774,9 @@ const SortableRow: React.FC<SortableRowProps> = ({
           <Button
             variant="outline"
             size="xs"
-            disabled={isValidating}
-            onClick={(e) => { e.stopPropagation(); onValidate(record.user_id, displayName); }}
+            onClick={(e) => { e.stopPropagation(); onDiagnose(record); }}
           >
-            {isValidating ? <Loader2 className="animate-spin" /> : <ShieldCheck />} 验证
+            <ShieldCheck /> 验证
           </Button>
           <Button variant="destructive" size="xs" onClick={(e) => { e.stopPropagation(); onRequestRemove(record); }}>
             <Trash2 /> 删除
@@ -813,7 +800,7 @@ const SortableRow: React.FC<SortableRowProps> = ({
               <Star /> 设为默认
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onSelect={() => onValidate(record.user_id, displayName)}>
+          <DropdownMenuItem onSelect={() => onDiagnose(record)}>
             <ShieldCheck /> 验证
           </DropdownMenuItem>
           <DropdownMenuSeparator />

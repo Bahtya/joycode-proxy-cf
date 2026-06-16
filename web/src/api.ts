@@ -29,6 +29,21 @@ export interface ModelInfo {
   name: string;
 }
 
+export interface DiagStep {
+  key: string;
+  label: string;
+  ok: boolean;
+  latency_ms: number;
+  detail?: string;
+  [k: string]: unknown;
+}
+
+export interface DiagnoseResult {
+  account: { user_id: string; nickname: string; default_model: string; credential_valid: number };
+  steps: DiagStep[];
+  timestamp: string;
+}
+
 export interface Stats {
   total_requests: number;
   total_input_tokens: number;
@@ -182,6 +197,8 @@ export const api = {
     request<{ ok: boolean }>(`/api/accounts/${encodeURIComponent(userId)}/default`, { method: 'PUT' }),
   validateAccount: (userId: string) =>
     request<{ valid: boolean }>(`/api/accounts/${encodeURIComponent(userId)}/validate`, { method: 'POST' }),
+  diagnoseAccount: (userId: string) =>
+    request<DiagnoseResult>(`/api/accounts/${encodeURIComponent(userId)}/diagnose`, { method: 'POST' }),
   listModels: () => request<{ models: ModelInfo[] }>('/api/models').then(r => r.models),
   listUpstreamModels: () => request<{ models: ModelInfo[] }>('/api/upstream-models').then(r => r.models),
   getStats: () => request<Stats>('/api/stats'),

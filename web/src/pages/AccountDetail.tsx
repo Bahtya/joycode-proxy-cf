@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  ArrowLeft, RefreshCw, Trash2, Copy, Loader2, KeyRound, Info,
+  ArrowLeft, RefreshCw, Trash2, Copy, Loader2, KeyRound, Info, ShieldCheck,
   Activity, Zap, CheckCircle2, XCircle, BarChart3, Globe, Clock,
   ArrowLeftRight, Flame, AlertTriangle, HelpCircle,
 } from 'lucide-react';
@@ -15,6 +15,7 @@ import type { Account, AccountStats, ModelInfo, RequestLog } from '@/api';
 import SvgClaudeCode from '@/components/ClaudeCodeIcon';
 import SvgCodex from '@/components/CodexIcon';
 import { StatisticCard } from '@/components/statistic-card';
+import { AccountDiagnoseDialog } from '@/components/account-diagnose-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -150,6 +151,7 @@ const AccountDetail: React.FC = () => {
   const [savingModel, setSavingModel] = useState(false);
   const [renewing, setRenewing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
   const [logFilter, setLogFilter] = useState<string>('all');
   // active_sessions is always 0 on the edge port (no in-memory session tracker), so
   // this is a constant — the previous 5s listAccounts() poll that set it was
@@ -361,6 +363,10 @@ const AccountDetail: React.FC = () => {
               <RefreshCw className="size-4" />
               刷新
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setDiagOpen(true)}>
+              <ShieldCheck className="size-4" />
+              验证 / 诊断
+            </Button>
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="destructive" size="sm" disabled={deleting}>
@@ -386,6 +392,12 @@ const AccountDetail: React.FC = () => {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+            <AccountDiagnoseDialog
+              account={account}
+              open={diagOpen}
+              onOpenChange={setDiagOpen}
+              onDone={fetchData}
+            />
           </div>
         </div>
 
