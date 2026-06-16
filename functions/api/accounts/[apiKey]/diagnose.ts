@@ -76,7 +76,9 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, params }) => {
   let modelIds: string[] = [];
   try {
     const list = await client.listModels();
-    modelIds = list.map((m) => m.modelId).filter((id) => id !== '');
+    // The id may live in `label` rather than `modelId` (translateOpenAIModels uses
+    // modelId || label); mirror that so the count and probe-model selection are correct.
+    modelIds = list.map((m) => m.modelId || m.label || '').filter((id) => id !== '');
     steps.push({
       key: 'models',
       label: '模型列表',

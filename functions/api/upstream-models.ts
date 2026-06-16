@@ -44,7 +44,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   try {
     const list = await clientFor(env, account).listModels();
     const models: DashboardModel[] = list
-      .map((m) => ({ id: m.modelId, name: m.label || m.modelId }))
+      .map((m) => ({ id: m.modelId || m.label || '', name: m.label || m.modelId }))
       .filter((m) => m.id !== '');
     // Best-effort cache write (don't let a settings write failure fail the request).
     await Promise.all([
