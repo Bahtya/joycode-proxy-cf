@@ -217,13 +217,80 @@ async function handleStream(
     return jsonError(502, 'upstream returned no body');
   }
 
-  const msgID = msgId();
   const model = req.model ?? '';
+
+  // tee() the upstream stream into two branches:
+  //   - transBranch: consumed by the OpenAI→Anthropic translation below (the
+  //     client-facing ReadableStream). It only needs chunks up to finish_reason.
+  //   - logBranch: drained fully in a background waitUntil to capture the FINAL
+  //     usage chunk (which OpenAI upstreams emit AFTER finish_reason) and write the
+  //     request log.
+  // This mirrors /v1/chat/completions and is the only drain pattern Workers
+  // reliably honors: flushing from inside the translation stream's start(), after
+  // controller.close(), is silently dropped once the response is sent.
+  const [transBranch, logBranch] = upstreamBody.tee();
+
+  waitUntil(
+    (async () => {
+      let inTk = 0;
+      let outTk = 0;
+      let drainOk = true;
+      const reader = logBranch.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const { events, rest } = parseSSEChunk(buffer);
+          buffer = rest;
+          for (const ev of events) {
+            const d = ev.data;
+            if (!d || d === '[DONE]') continue;
+            try {
+              const chunk = JSON.parse(d) as StreamChunk;
+              if (chunk && chunk.usage) {
+                inTk = chunk.usage.prompt_tokens ?? inTk;
+                outTk = chunk.usage.completion_tokens ?? outTk;
+              }
+            } catch {
+              /* swallow non-JSON / partial frames */
+            }
+          }
+        }
+      } catch {
+        drainOk = false;
+      } finally {
+        try {
+          reader.releaseLock();
+        } catch {
+          /* noop */
+        }
+      }
+      const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
+      if (enableLogging) {
+        await store.logRequest(
+          makeLog(
+            account.userId,
+            model,
+            '/v1/messages',
+            true,
+            drainOk ? 200 : 500,
+            started,
+            drainOk ? '' : 'upstream stream error',
+            inTk,
+            outTk,
+          ),
+        );
+      }
+    })(),
+  );
+
+  const msgID = msgId();
   // totalOutput counts CHARACTERS of emitted text; output_tokens = totalOutput/4
   // (handler.go:277, :442). Matches Go's len(text) accumulation.
   let totalOutput = 0;
-  let streamInTk = 0;
-  let streamOutTk = 0;
 
   // Per-index tool-call accumulators + bookkeeping (handler.go:289-298).
   const toolCalls = new Map<number, ToolCallAccum>();
@@ -240,14 +307,7 @@ async function handleStream(
   let anyBlockStarted = false;
 
   const encoder = new TextEncoder();
-  let logFlushed = false;
   let terminalSent = false; // finish() emits the terminal sequence exactly once
-  let hadStreamError = false; // true if the upstream stream errored mid-flight
-  // Set once finish_reason is seen: the terminal sequence has been sent and the
-  // client controller closed. We do NOT stop reading — OpenAI upstreams emit the
-  // final usage in a chunk AFTER finish_reason, so we keep draining only to
-  // capture that trailing usage (see the usage-capture + clientDone guard below).
-  let clientDone = false;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -277,7 +337,7 @@ async function handleStream(
       );
       push(encodeSSE('ping', { type: 'ping' }));
 
-      const reader = upstreamBody.getReader();
+      const reader = transBranch.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
 
@@ -362,18 +422,8 @@ async function handleStream(
               continue;
             }
 
-            // Capture usage whenever present (handler.go:309-320). Runs for EVERY
-            // chunk — including the trailing usage-only chunk after finish_reason —
-            // so it MUST stay before the clientDone guard below.
-            if (chunk.usage) {
-              streamInTk = chunk.usage.prompt_tokens ?? streamInTk;
-              streamOutTk = chunk.usage.completion_tokens ?? streamOutTk;
-            }
-
-            // Terminal already sent (finish_reason seen): the client is fully
-            // served. Keep draining ONLY to capture the trailing usage chunk —
-            // skip all delta/finish processing.
-            if (clientDone) continue;
+            // Usage is captured by the logBranch drain (see the waitUntil above),
+            // not here — the translation only needs choices/deltas up to finish_reason.
 
             const choices = chunk.choices;
             if (!choices || choices.length === 0) continue;
@@ -458,49 +508,33 @@ async function handleStream(
               } catch {
                 /* already closed */
               }
-              // Do NOT return. The client already has its terminal sequence, but
-              // OpenAI upstreams send the final usage in a SEPARATE chunk AFTER
-              // finish_reason — returning here (as the Go port did) skips it and
-              // logs 0 tokens. Set clientDone and let the read loop drain the
-              // trailing chunk; usage is captured above, everything else is
-              // skipped by the clientDone guard. This mirrors the /v1/chat
-              // tee()+drain path that loses 0% of usage.
-              clientDone = true;
+              // The trailing usage chunk is captured by the logBranch drain, so the
+              // translation is done once the client has its terminal sequence.
+              return;
             }
           }
         }
         // Always synthesize a terminal sequence at EOF so the Anthropic SDK gets a
         // message_stop even when the upstream ended after deltas without a
-        // finish_reason (idempotent via terminalSent). (#1). Skip if we already
-        // finished via finish_reason (clientDone) — only the no-finish_reason case
-        // needs the synthesized terminal.
-        if (!clientDone) finish('end_turn', false);
+        // finish_reason (idempotent via terminalSent). (#1)
+        finish('end_turn', false);
       } catch (err) {
         // Upstream stream errored mid-flight (abort/timeout/truncation). Surface it
         // as an Anthropic error event AND a terminal sequence so the SDK completes
         // instead of hanging on a silent/truncated turn. (#4)
-        //
-        // If a clean terminal was already delivered (finish_reason seen, we were
-        // only draining for the trailing usage chunk), a subsequent abort /
-        // client-disconnect is benign: the client already has its complete
-        // response. Don't emit a second error event or flip the log to 500 — just
-        // fall through to finally and log whatever usage we captured (status 200).
-        if (!terminalSent) {
-          hadStreamError = true;
-          const errMsg = err instanceof Error ? err.message : String(err);
-          const isAbort = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
-          push(
-            encodeSSE('error', {
-              type: 'error',
-              error: { type: isAbort ? 'overloaded_error' : 'api_error', message: errMsg.slice(0, 500) },
-            }),
-          );
-          const errorStopReason = toolBlockStarted.size > 0 ? 'tool_use' : 'end_turn';
-          try {
-            finish(errorStopReason, true);
-          } catch {
-            /* best-effort */
-          }
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const isAbort = err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError');
+        push(
+          encodeSSE('error', {
+            type: 'error',
+            error: { type: isAbort ? 'overloaded_error' : 'api_error', message: errMsg.slice(0, 500) },
+          }),
+        );
+        const errorStopReason = toolBlockStarted.size > 0 ? 'tool_use' : 'end_turn';
+        try {
+          finish(errorStopReason, true);
+        } catch {
+          /* best-effort */
         }
       } finally {
         try {
@@ -513,17 +547,9 @@ async function handleStream(
         } catch {
           /* already closed */
         }
-        // Log exactly once, regardless of which branch produced the terminal
-        // events (finish_reason / clean EOF / scanner error).
-        if (!logFlushed) {
-          logFlushed = true;
-          // If upstream still surfaced no usage chunk (rare after the drain fix),
-          // fall back to the same char/4 output estimate the client's
-          // message_delta uses, so a residual zero-usage stream logs a non-zero
-          // output. Input can't be estimated client-side and stays 0 in that case.
-          const logOutTk = streamOutTk > 0 ? streamOutTk : Math.trunc(totalOutput / 4);
-          flushUsageAndLog(env, store, account, model, started, streamInTk, logOutTk, waitUntil, hadStreamError ? 500 : 200);
-        }
+        // Usage capture + the request log happen in the logBranch drain (see the
+        // waitUntil above). Do NOT flush here — flushing from start() after
+        // controller.close() is dropped by Workers once the response is sent.
       }
     },
   });
@@ -628,31 +654,3 @@ async function maybeLog(env: Env, store: ReturnType<typeof createStore>, log: Re
   }
 }
 
-/**
- * Flush captured stream usage into a request log row. Idempotent-ish: the caller
- * arranges for this to run once at stream completion (the translated stream
- * calls it from the finish branch and the finally; the finally is the source of
- * truth because it always runs).
- */
-function flushUsageAndLog(
-  env: Env,
-  store: ReturnType<typeof createStore>,
-  account: Account,
-  model: string,
-  started: number,
-  inputTokens: number,
-  outputTokens: number,
-  waitUntil: (p: Promise<unknown>) => void,
-  status: number = 200,
-): void {
-  waitUntil(
-    (async () => {
-      const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
-      if (enableLogging) {
-        await store.logRequest(
-          makeLog(account.userId, model, '/v1/messages', true, status, started, '', inputTokens, outputTokens),
-        );
-      }
-    })(),
-  );
-}
