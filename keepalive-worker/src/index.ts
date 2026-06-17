@@ -119,7 +119,9 @@ async function runKeepalive(env: CronEnv): Promise<void> {
   await store.cleanupOldLogs(retentionDays > 0 ? retentionDays : 30, tzOff);
 }
 
-const PROBE_CHAT_ENDPOINT = '/api/saas/openai/v1/chat/completions';
+// Color-gateway function ID for chat (was the legacy path; the client now signs
+// it as a functionId against api-ai.jd.com).
+const PROBE_CHAT_ENDPOINT = 'chat_completions';
 
 /**
  * One-minute upstream availability probe for the dashboard card. Pings the
