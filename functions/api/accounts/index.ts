@@ -3,7 +3,7 @@
 // and the reorderAccounts (1050) sub-action that the Go router serves from PUT /api/accounts/reorder.
 //
 // JWT-gated by functions/api/_middleware.ts (auth is done before we run).
-import type { Env, Account } from '../../../src/types';
+import type { Env, Account, KeepaliveStatusRow } from '../../../src/types';
 import { createStore } from '../../../src/store/d1';
 import { getAllTimeTotals } from '../../../src/store/dashboard';
 import { getIntSetting } from '../../../src/store/settings';
@@ -38,7 +38,7 @@ interface AccountInfo {
  *
  * Done inline here rather than in src/store so we don't touch the foundation.
  */
-async function toAccountInfo(db: D1Database, a: Account, off: number = 8): Promise<AccountInfo> {
+async function toAccountInfo(db: D1Database, a: Account, ka: KeepaliveStatusRow | undefined, off: number = 8): Promise<AccountInfo> {
   const key = a.userId;
   // all-time = rolled-up stats_daily + live-window raw (disjoint; see
   // getAllTimeTotals). today stays raw, offset-aware (local midnight).
@@ -69,9 +69,11 @@ async function toAccountInfo(db: D1Database, a: Account, off: number = 8): Promi
     total_tokens: allTotals.total_input_tokens + allTotals.total_output_tokens,
     today_tokens: todayRow?.tokens ?? 0,
     credential_valid: a.credentialValid,
-    credential_checked_at: a.credentialRefreshedAt,
+    // last probe time (success or failure) from keepalive_status, not just the
+    // success-only refreshed_at; and surface the real keepalive error message.
+    credential_checked_at: ka?.last_checked || a.credentialRefreshedAt,
     credential_refreshed_at: a.credentialRefreshedAt,
-    credential_error: '',
+    credential_error: ka?.message ? ka.message.slice(0, 200) : '',
   };
 }
 
@@ -111,8 +113,12 @@ async function resolveFromPtKey(
 export const onRequestGet: PagesFunction<Env> = async ({ env }) => {
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
   const off = await getIntSetting(env.DB, 'tz_offset', 8);
-  const accounts = await store.listAccounts();
-  const infos = await Promise.all(accounts.map((a) => toAccountInfo(env.DB, a, off)));
+  const [accounts, kaRows] = await Promise.all([
+    store.listAccounts(),
+    store.listKeepaliveStatus(),
+  ]);
+  const kaMap = new Map(kaRows.map((k) => [k.user_id, k]));
+  const infos = await Promise.all(accounts.map((a) => toAccountInfo(env.DB, a, kaMap.get(a.userId), off)));
   return Response.json({ accounts: infos });
 };
 

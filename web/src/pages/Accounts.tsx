@@ -178,7 +178,12 @@ const CredentialBadge = ({ record }: { record: Account }) => {
             </Badge>
           </span>
         </TooltipTrigger>
-        <TooltipContent>{record.credential_error || '凭证已过期，请重新扫码登录获取凭证'}</TooltipContent>
+        <TooltipContent>
+          <div className="space-y-0.5">
+            <div>{record.credential_error || '凭证已过期，请重新扫码登录获取凭证'}</div>
+            <div className="text-xs text-muted-foreground">上次检测：{record.credential_checked_at || '未知'}</div>
+          </div>
+        </TooltipContent>
       </Tooltip>
     );
   }
