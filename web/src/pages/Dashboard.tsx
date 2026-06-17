@@ -433,9 +433,9 @@ const Dashboard: React.FC = () => {
                 icon={<TrendingUp className="size-4 text-muted-foreground" />}
               />
               <StatisticCard
-                label="平均 TPS"
+                label="解码 TPS"
                 value={<span className={tpsColor}>{avgTps.toFixed(1)}</span>}
-                sub="tok/s · 仅流式"
+                sub="tok/s · 回归去开销"
                 icon={<Gauge className={`size-4 ${tpsColor}`} />}
               />
             </div>

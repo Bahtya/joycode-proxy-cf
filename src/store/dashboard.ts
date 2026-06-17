@@ -131,6 +131,35 @@ async function safeFirst<T>(p: Promise<{ results?: T[] } | T | null>): Promise<T
   }
 }
 
+/** Regression sums for latency ~ input + output tokens (stream rows). */
+interface RegSums {
+  n: number; sx: number; sw: number; sy: number;
+  sxx: number; sww: number; sxw: number; sxy: number; swy: number;
+}
+
+/**
+ * Estimate the TRUE decode speed (tok/s) via multiple linear regression of
+ * latency_ms on input + output tokens. The output slope (ms/output_tok) isolates
+ * decode from RTT/TTFT (intercept) and prefill (input slope) — which per-request
+ * timing can't, because the upstream bursts delivery (so first→last-chunk span is
+ * just the delivery burst, not decode time).
+ *
+ * Solves the 3×3 normal equations [[n,sx,sw],[sx,sxx,sxw],[sw,sxw,sww]]·β=[sy,sxy,swy]
+ * by Cramer's rule; decode rate = 1000/β_out. Returns null when there's too little
+ * data (<30 rows) or the system is degenerate, so the caller can fall back.
+ */
+function fitDecodeRate(s: RegSums | null | undefined): number | null {
+  if (!s || s.n < 30) return null;
+  const { n, sx, sw, sy, sxx, sww, sxw, sxy, swy } = s;
+  const det = n * (sxx * sww - sxw * sxw) - sx * (sx * sww - sxw * sw) + sw * (sx * sxw - sxx * sw);
+  if (det === 0) return null;
+  const detOut = n * (sxx * swy - sxy * sxw) - sx * (sx * swy - sxy * sw) + sy * (sx * sxw - sxx * sw);
+  const bout = detOut / det; // ms per output token
+  if (!(bout > 0)) return null;
+  const tps = 1000 / bout;
+  return tps >= 1 && tps <= 500 ? Math.round(tps * 10) / 10 : null;
+}
+
 /**
  * Global dashboard stats. Mirrors store.GetStats + GetAllTimeTotals + GetHourlyStats.
  * Optionally scoped to a single account via opts.userId (used by the account detail view).
@@ -174,7 +203,7 @@ export async function getStats(
 
   // Collapse the 7 sequential scalar scans into ONE conditional-aggregation query and
   // run the independent queries in parallel. (P1)
-  const [agg, accountsCountRow, byModelRes, byClientRes, by_account, all_time, hourly] = await Promise.all([
+  const [agg, accountsCountRow, byModelRes, byClientRes, by_account, all_time, hourly, regAgg] = await Promise.all([
     bind(
       db.prepare(
         `SELECT
@@ -207,6 +236,18 @@ export async function getStats(
     byAccount(),
     getAllTimeTotals(db, opts.userId),
     getHourlyStats(db, opts.userId, off),
+    bind(
+      db.prepare(
+        `SELECT
+           COUNT(*) AS n,
+           SUM(input_tokens) AS sx, SUM(output_tokens) AS sw, SUM(latency_ms) AS sy,
+           SUM(input_tokens * input_tokens) AS sxx, SUM(output_tokens * output_tokens) AS sww,
+           SUM(input_tokens * output_tokens) AS sxw,
+           SUM(input_tokens * latency_ms) AS sxy, SUM(output_tokens * latency_ms) AS swy
+         FROM request_logs ${todayFilter} AND stream = 1 AND output_tokens >= 20
+           AND latency_ms BETWEEN 500 AND 120000`
+      )
+    ).first<RegSums>(),
   ]);
 
   return {
@@ -215,7 +256,9 @@ export async function getStats(
     total_output_tokens: agg?.total_output ?? 0,
     accounts_count: accountsCountRow?.n ?? 0,
     avg_latency_ms: agg?.avg_latency ?? 0,
-    avg_tps: agg?.avg_tps ?? 0,
+    // True decode speed from regression (overhead-compensated); fall back to the
+    // latency-based per-row avg when there's too little data to fit.
+    avg_tps: fitDecodeRate(regAgg) ?? agg?.avg_tps ?? 0,
     error_count: agg?.error_count ?? 0,
     stream_count: agg?.stream_count ?? 0,
     success_count: agg?.success_count ?? 0,
