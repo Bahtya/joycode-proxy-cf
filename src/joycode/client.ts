@@ -84,7 +84,8 @@ export function createJoyClient(opts: JoyCodeClientOptions): JoyCodeClient {
 
   async function doFetch(functionId: string, body: string, method: 'POST' | 'GET' = 'POST'): Promise<Response> {
     const url = await signedColorUrl(baseURL, functionId);
-    const init: RequestInit = { method, headers: colorHeaders(ptKey), body };
+    const init: RequestInit = { method, headers: colorHeaders(ptKey) };
+    if (method !== 'GET') init.body = body;
     const signal = timeoutSignal(timeoutSec);
     if (signal) init.signal = signal;
     return fetch(url, init);
