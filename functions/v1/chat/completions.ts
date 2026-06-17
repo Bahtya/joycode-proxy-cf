@@ -208,16 +208,11 @@ async function handleStream(
       const reader = body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let firstChunkMs = 0;
-      let lastChunkMs = 0;
       let lastUsageObj: Record<string, unknown> | null = null;
       try {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          const now = Date.now();
-          if (!firstChunkMs) firstChunkMs = now;
-          lastChunkMs = now;
           controller.enqueue(value); // forward to client immediately (low TTFT)
           buffer += decoder.decode(value, { stream: true });
           let idx: number;
@@ -247,8 +242,12 @@ async function handleStream(
         }
         const inputTokens = lastUsageObj ? numOr(lastUsageObj['prompt_tokens']) : 0;
         const outputTokens = lastUsageObj ? numOr(lastUsageObj['completion_tokens']) : 0;
-        const genMs = lastChunkMs - firstChunkMs;
-        const tps = genMs > 0 && outputTokens > 0 ? outputTokens / (genMs / 1000) : 0;
+        // TPS from end-to-end latency (includes TTFT/prefill, so it understates
+        // true decode speed). The first→last-chunk span is NOT used: the upstream
+        // delivers the stream in a burst (~1000s of tok/s), not paced at decode
+        // rate, so a chunk span wildly overstates generation speed.
+        const elapsedMs = Date.now() - started;
+        const tps = elapsedMs > 0 && outputTokens > 0 ? outputTokens / (elapsedMs / 1000) : 0;
         const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
         if (enableLogging) {
           waitUntil(

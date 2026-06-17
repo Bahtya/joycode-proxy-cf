@@ -314,9 +314,8 @@ async function handleStream(
       const reader = upstreamBody.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      // Timing (real upstream-paced arrival) + usage captured on this live read.
-      let firstChunkMs = 0;
-      let lastChunkMs = 0;
+      // Usage captured on this live read (we read past finish_reason to the
+      // trailing usage chunk). TPS is derived from end-to-end latency below.
       let inTk = 0;
       let outTk = 0;
       let streamOk = true;
@@ -384,9 +383,6 @@ async function handleStream(
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          const now = Date.now();
-          if (!firstChunkMs) firstChunkMs = now;
-          lastChunkMs = now;
           buffer += decoder.decode(value, { stream: true });
 
           // Feed complete frames into parseSSEChunk; keep the trailing partial.
@@ -532,10 +528,12 @@ async function handleStream(
         } catch {
           /* already closed */
         }
-        // TPS from real upstream-paced timing; log via waitUntil so it survives
-        // past response send (the client stream is closed, but D1 writes persist).
-        const genMs = lastChunkMs - firstChunkMs;
-        const tps = genMs > 0 && outTk > 0 ? outTk / (genMs / 1000) : 0;
+        // TPS from end-to-end latency (includes TTFT/prefill → understates true
+        // decode). The chunk-arrival span is not used: the upstream bursts the
+        // stream rather than pacing it at decode rate, so a span overstates TPS.
+        // Log via waitUntil so it survives past response send.
+        const elapsedMs = Date.now() - started;
+        const tps = elapsedMs > 0 && outTk > 0 ? outTk / (elapsedMs / 1000) : 0;
         waitUntil(
           maybeLog(env, store, makeLog({
             apiKey: account.userId, model, endpoint: '/v1/messages',
