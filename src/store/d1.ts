@@ -221,8 +221,8 @@ export class Store {
     await this.db
       .prepare(
         `INSERT INTO request_logs
-          (api_key, model, endpoint, client, user_agent, stream, status_code, latency_ms, error_message, input_tokens, output_tokens, created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`
+          (api_key, model, endpoint, client, user_agent, stream, status_code, latency_ms, error_message, input_tokens, output_tokens, tps, created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`
       )
       .bind(
         log.api_key,
@@ -235,7 +235,8 @@ export class Store {
         log.latency_ms,
         log.error_message,
         log.input_tokens,
-        log.output_tokens
+        log.output_tokens,
+        log.tps
       )
       .run();
   }

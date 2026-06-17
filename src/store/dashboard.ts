@@ -55,6 +55,7 @@ export interface GlobalStats {
   total_output_tokens: number;
   accounts_count: number;
   avg_latency_ms: number;
+  avg_tps: number;
   error_count: number;
   stream_count: number;
   success_count: number;
@@ -183,12 +184,13 @@ export async function getStats(
            SUM(CASE WHEN stream = 1 THEN 1 ELSE 0 END) AS stream_count,
            SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) AS success_count,
            COALESCE(SUM(input_tokens), 0) AS total_input,
-           COALESCE(SUM(output_tokens), 0) AS total_output
+           COALESCE(SUM(output_tokens), 0) AS total_output,
+           COALESCE(AVG(CASE WHEN tps > 0 THEN tps END), 0) AS avg_tps
          FROM request_logs ${todayFilter}`
       )
     ).first<{
       total_requests: number; avg_latency: number; error_count: number;
-      stream_count: number; success_count: number; total_input: number; total_output: number;
+      stream_count: number; success_count: number; total_input: number; total_output: number; avg_tps: number;
     }>(),
     db.prepare('SELECT COUNT(*) AS n FROM accounts').first<{ n: number }>(),
     bind(
@@ -212,6 +214,7 @@ export async function getStats(
     total_output_tokens: agg?.total_output ?? 0,
     accounts_count: accountsCountRow?.n ?? 0,
     avg_latency_ms: agg?.avg_latency ?? 0,
+    avg_tps: agg?.avg_tps ?? 0,
     error_count: agg?.error_count ?? 0,
     stream_count: agg?.stream_count ?? 0,
     success_count: agg?.success_count ?? 0,

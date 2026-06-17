@@ -6,7 +6,7 @@ import {
 } from "recharts"
 import {
   Zap, CheckCircle2, XCircle, Users, Activity, ArrowLeftRight,
-  LayoutDashboard, Flame, TrendingUp, Loader2, Globe,
+  LayoutDashboard, Flame, TrendingUp, Loader2, Globe, Gauge,
 } from "lucide-react"
 import { api, accountDisplayName } from "@/api"
 import { useTz } from "@/lib/tz"
@@ -104,6 +104,7 @@ const Dashboard: React.FC = () => {
   const avgTokensPerReq = stats.total_requests > 0
     ? Math.round(totalTokens / stats.total_requests) : 0
   const avgLatency = Math.round(stats.avg_latency_ms)
+  const avgTps = stats.avg_tps ?? 0
 
   const latencyColor =
     avgLatency < 5000 ? "text-emerald-600"
@@ -112,6 +113,11 @@ const Dashboard: React.FC = () => {
   const successColor =
     successRate >= 95 ? "text-emerald-600"
       : successRate >= 80 ? "text-amber-500"
+        : "text-red-500"
+  // Output tokens/sec for stream requests (first→last chunk). Higher is faster.
+  const tpsColor =
+    avgTps >= 40 ? "text-emerald-600"
+      : avgTps >= 15 ? "text-amber-500"
         : "text-red-500"
 
   const modelData = stats.by_model.map((m) => ({
@@ -425,6 +431,12 @@ const Dashboard: React.FC = () => {
                 label="使用模型"
                 value={stats.by_model.length}
                 icon={<TrendingUp className="size-4 text-muted-foreground" />}
+              />
+              <StatisticCard
+                label="平均 TPS"
+                value={<span className={tpsColor}>{avgTps.toFixed(1)}</span>}
+                sub="tok/s · 仅流式"
+                icon={<Gauge className={`size-4 ${tpsColor}`} />}
               />
             </div>
           </CardContent>

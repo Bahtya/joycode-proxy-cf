@@ -118,7 +118,7 @@ async function handleNonStream(
   const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
   if (enableLogging) {
     waitUntil(
-      store.logRequest(makeLog(account.userId, model, '/v1/chat/completions', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? ''))
+      store.logRequest(makeLog(account.userId, model, '/v1/chat/completions', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0))
     );
   }
 
@@ -179,7 +179,7 @@ async function handleStream(
     });
     waitUntil(
       store.logRequest(
-        makeLog(account.userId, model, '/v1/chat/completions', true, 502, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '')
+        makeLog(account.userId, model, '/v1/chat/completions', true, 502, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0)
       )
     );
     return new Response(errorStream, { headers: SSE_HEADERS });
@@ -198,6 +198,8 @@ async function handleStream(
       let inputTokens = 0;
       let outputTokens = 0;
       let lastUsageObj: Record<string, unknown> | null = null;
+      let firstChunkMs = 0;
+      let lastChunkMs = 0;
       const reader = logBranch.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -211,6 +213,11 @@ async function handleStream(
           while ((idx = buffer.indexOf('\n\n')) !== -1) {
             const event = buffer.slice(0, idx);
             buffer = buffer.slice(idx + 2);
+            if (!event.includes('[DONE]')) {
+              const now = Date.now();
+              if (!firstChunkMs) firstChunkMs = now;
+              lastChunkMs = now;
+            }
             const usage = parseUsageFromEvent(event);
             if (usage) lastUsageObj = usage;
           }
@@ -233,10 +240,12 @@ async function handleStream(
         inputTokens = numOr(lastUsageObj['prompt_tokens']);
         outputTokens = numOr(lastUsageObj['completion_tokens']);
       }
+      const genMs = lastChunkMs - firstChunkMs;
+      const tps = genMs > 0 && outputTokens > 0 ? outputTokens / (genMs / 1000) : 0;
       const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
       if (enableLogging) {
         await store.logRequest(
-          makeLog(account.userId, model, '/v1/chat/completions', true, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '')
+          makeLog(account.userId, model, '/v1/chat/completions', true, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '', tps)
         );
       }
     })()
@@ -283,7 +292,8 @@ function makeLog(
   inputTokens: number,
   outputTokens: number,
   client: string,
-  userAgent: string
+  userAgent: string,
+  tps: number
 ): RequestLogRow {
   return {
     api_key: apiKey,
@@ -297,6 +307,7 @@ function makeLog(
     error_message: errorMessage,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    tps,
   };
 }
 

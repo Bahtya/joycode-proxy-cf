@@ -63,6 +63,8 @@ export interface RequestLogRow {
   error_message: string;
   input_tokens: number;
   output_tokens: number;
+  /** Output tokens/sec for stream requests (first→last chunk span); 0 otherwise. */
+  tps: number;
   created_at?: string;
 }
 

@@ -50,6 +50,7 @@ export interface Stats {
   total_output_tokens: number;
   accounts_count: number;
   avg_latency_ms: number;
+  avg_tps: number;
   error_count: number;
   stream_count: number;
   success_count: number;

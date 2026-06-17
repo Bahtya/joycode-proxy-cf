@@ -132,7 +132,7 @@ async function handleNonStream(
     }, maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '');
+    const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0);
     waitUntil(maybeLog(env, store, log));
     if (isTimeoutError(msg)) {
       return jsonError(504, `上游服务响应超时，请稍后重试。原始错误: ${msg}`);
@@ -148,7 +148,7 @@ async function handleNonStream(
       const fr = (choice as Record<string, unknown>)['finish_reason'];
       if (fr === 'content_filter') {
         const msg = JSON.stringify(choice);
-        const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 400, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '');
+        const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 400, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0);
         waitUntil(maybeLog(env, store, log));
         return contentFilterError(msg);
       }
@@ -166,7 +166,7 @@ async function handleNonStream(
     outputTokens = numOr((usage as Record<string, unknown>)['completion_tokens']);
   }
 
-  const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '');
+  const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0);
   waitUntil(maybeLog(env, store, log));
 
   return Response.json(resp);
@@ -224,7 +224,7 @@ async function handleStream(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     waitUntil(
-      maybeLog(env, store, makeLog(account.userId, req.model ?? '', '/v1/messages', true, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '')),
+      maybeLog(env, store, makeLog(account.userId, req.model ?? '', '/v1/messages', true, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0)),
     );
     if (isTimeoutError(msg)) {
       return jsonError(504, `上游服务响应超时，请稍后重试。原始错误: ${msg}`);
@@ -255,6 +255,8 @@ async function handleStream(
       let inTk = 0;
       let outTk = 0;
       let drainOk = true;
+      let firstChunkMs = 0;
+      let lastChunkMs = 0;
       const reader = logBranch.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -268,6 +270,9 @@ async function handleStream(
           for (const ev of events) {
             const d = ev.data;
             if (!d || d === '[DONE]') continue;
+            const now = Date.now();
+            if (!firstChunkMs) firstChunkMs = now;
+            lastChunkMs = now;
             try {
               const chunk = JSON.parse(d) as StreamChunk;
               if (chunk && chunk.usage) {
@@ -288,6 +293,8 @@ async function handleStream(
           /* noop */
         }
       }
+      const genMs = lastChunkMs - firstChunkMs;
+      const tps = genMs > 0 && outTk > 0 ? outTk / (genMs / 1000) : 0;
       const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
       if (enableLogging) {
         await store.logRequest(
@@ -303,6 +310,7 @@ async function handleStream(
             outTk,
             ctx.data.client ?? '',
             ctx.data.userAgent ?? '',
+            tps,
           ),
         );
       }
@@ -656,6 +664,7 @@ function makeLog(
   outputTokens: number,
   client: string,
   userAgent: string,
+  tps: number,
 ): RequestLogRow {
   return {
     api_key: apiKey,
@@ -669,6 +678,7 @@ function makeLog(
     error_message: errorMessage,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    tps,
   };
 }
 
