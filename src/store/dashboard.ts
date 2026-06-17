@@ -185,7 +185,8 @@ export async function getStats(
            SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) AS success_count,
            COALESCE(SUM(input_tokens), 0) AS total_input,
            COALESCE(SUM(output_tokens), 0) AS total_output,
-           COALESCE(AVG(CASE WHEN tps > 0 THEN tps END), 0) AS avg_tps
+           -- avg output tok/s for stream replies; drop <20-token replies (noisy windows)
+           COALESCE(AVG(CASE WHEN tps > 0 AND output_tokens >= 20 THEN tps END), 0) AS avg_tps
          FROM request_logs ${todayFilter}`
       )
     ).first<{

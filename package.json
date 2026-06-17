@@ -5,7 +5,6 @@
   "type": "module",
   "description": "Cloudflare Pages + Functions edge port of JoyCodeProxy (protocol translator → JoyCode).",
   "scripts": {
-    "types": "wrangler types",
     "build:web": "cd web && node node_modules/typescript/bin/tsc -b && node node_modules/vite/bin/vite.js build",
     "dev": "npm run build:web && wrangler pages dev ./web-build --local --compatibility-date 2026-06-01",
     "pages:dev": "npm run build:web && wrangler pages dev ./web-build --local --compatibility-date 2026-06-01",

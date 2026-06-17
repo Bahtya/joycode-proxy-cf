@@ -41,6 +41,8 @@ TypeScript · React 19 · Vite · Tailwind v4 · shadcn/ui · recharts · @dnd-k
 
 ## 部署
 
+> 前置依赖：需全局安装 `wrangler`（`npm i -g wrangler`）或在命令里用 `npx wrangler` —— 本仓库不把 wrangler 列为 devDependency（Termux/Android 上本地 wrangler 的 shebang 与 workerd 均不可用，故依赖全局）。完整步骤见 DEPLOY.md。
+
 见 **[DEPLOY.md](./DEPLOY.md)** —— 从零到上线的完整步骤（D1 / KV 创建、数据库迁移、密钥、前端构建、Pages + Cron 部署、验证）。
 
 ## 目录结构

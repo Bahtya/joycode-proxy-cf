@@ -14,11 +14,12 @@
 //     parse usage directly from the stream since we cannot intercept the bytes
 //     the client already received.
 //   - Timeout detection (isTimeoutError, chat.go:104-110) maps to 504.
-import type { Env, Account, RequestLogRow } from '../../../src/types';
+import type { Env, Account } from '../../../src/types';
 import type { V1Data } from '../_middleware';
 import { ensureSettings } from '../_middleware';
 import { createStore } from '../../../src/store/d1';
 import { readJson, jsonError } from '../../../src/util/http';
+import { makeLog } from '../../../src/util/logRow';
 import { createJoyClient } from '../../../src/joycode/client';
 import { withRetry, parseRetries, EmptyUpstreamError } from '../../../src/proxy/retry';
 import { MODELS } from '../../../src/joycode/models';
@@ -118,7 +119,11 @@ async function handleNonStream(
   const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
   if (enableLogging) {
     waitUntil(
-      store.logRequest(makeLog(account.userId, model, '/v1/chat/completions', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0))
+      store.logRequest(makeLog({
+        apiKey: account.userId, model, endpoint: '/v1/chat/completions',
+        stream: false, statusCode: 200, started, errorMessage: '',
+        inputTokens, outputTokens, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps: 0,
+      }))
     );
   }
 
@@ -179,7 +184,11 @@ async function handleStream(
     });
     waitUntil(
       store.logRequest(
-        makeLog(account.userId, model, '/v1/chat/completions', true, 502, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0)
+        makeLog({
+          apiKey: account.userId, model, endpoint: '/v1/chat/completions',
+          stream: true, statusCode: 502, started, errorMessage: msg,
+          inputTokens: 0, outputTokens: 0, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps: 0,
+        })
       )
     );
     return new Response(errorStream, { headers: SSE_HEADERS });
@@ -213,7 +222,17 @@ async function handleStream(
           while ((idx = buffer.indexOf('\n\n')) !== -1) {
             const event = buffer.slice(0, idx);
             buffer = buffer.slice(idx + 2);
-            if (!event.includes('[DONE]')) {
+            // Stamp first→last content-chunk time only on frames carrying a real
+            // data line (skip [DONE] and keepalive `: ping` frames), matching the
+            // messages.ts drain — a raw includes('[DONE]') here would let pings
+            // shift the window on the OpenAI-native chat path.
+            const hasData = event.split('\n').some((l) => {
+              const s = l.endsWith('\r') ? l.slice(0, -1) : l;
+              if (!s.startsWith('data:')) return false;
+              const v = s.slice(5).trim();
+              return v !== '' && v !== '[DONE]';
+            });
+            if (hasData) {
               const now = Date.now();
               if (!firstChunkMs) firstChunkMs = now;
               lastChunkMs = now;
@@ -240,12 +259,19 @@ async function handleStream(
         inputTokens = numOr(lastUsageObj['prompt_tokens']);
         outputTokens = numOr(lastUsageObj['completion_tokens']);
       }
+      // firstChunkMs/lastChunkMs come from this background drain (the tee'd
+      // logBranch), so they reflect drain-read cadence, not exact upstream
+      // arrival — best-effort, like the try/catch around this drain.
       const genMs = lastChunkMs - firstChunkMs;
       const tps = genMs > 0 && outputTokens > 0 ? outputTokens / (genMs / 1000) : 0;
       const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
       if (enableLogging) {
         await store.logRequest(
-          makeLog(account.userId, model, '/v1/chat/completions', true, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '', tps)
+          makeLog({
+            apiKey: account.userId, model, endpoint: '/v1/chat/completions',
+            stream: true, statusCode: 200, started, errorMessage: '',
+            inputTokens, outputTokens, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps,
+          })
         );
       }
     })()
@@ -278,37 +304,6 @@ function parseUsageFromEvent(event: string): Record<string, unknown> | null {
     }
   }
   return null;
-}
-
-/** Build a RequestLogRow. The `stream` field is 0/1 per the D1 schema. */
-function makeLog(
-  apiKey: string,
-  model: string,
-  endpoint: string,
-  stream: boolean,
-  statusCode: number,
-  started: number,
-  errorMessage: string,
-  inputTokens: number,
-  outputTokens: number,
-  client: string,
-  userAgent: string,
-  tps: number
-): RequestLogRow {
-  return {
-    api_key: apiKey,
-    model,
-    endpoint,
-    client,
-    user_agent: userAgent,
-    stream: stream ? 1 : 0,
-    status_code: statusCode,
-    latency_ms: Date.now() - started,
-    error_message: errorMessage,
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
-    tps,
-  };
 }
 
 /** Coerce a JSON number (possibly bigint-ish) to a safe integer. */

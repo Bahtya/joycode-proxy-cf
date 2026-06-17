@@ -37,6 +37,7 @@ import { ensureSettings } from './_middleware';
 import { createStore } from '../../src/store/d1';
 import { getSetting } from '../../src/store/settings';
 import { readJson, jsonError } from '../../src/util/http';
+import { makeLog } from '../../src/util/logRow';
 import { createJoyClient } from '../../src/joycode/client';
 import { withRetry, parseRetries, EmptyUpstreamError } from '../../src/proxy/retry';
 import { msgId, tooluId } from '../../src/util/id';
@@ -132,7 +133,11 @@ async function handleNonStream(
     }, maxRetries);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0);
+    const log = makeLog({
+      apiKey: account.userId, model: req.model ?? '', endpoint: '/v1/messages',
+      stream: false, statusCode: 500, started, errorMessage: msg,
+      inputTokens: 0, outputTokens: 0, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps: 0,
+    });
     waitUntil(maybeLog(env, store, log));
     if (isTimeoutError(msg)) {
       return jsonError(504, `上游服务响应超时，请稍后重试。原始错误: ${msg}`);
@@ -148,7 +153,11 @@ async function handleNonStream(
       const fr = (choice as Record<string, unknown>)['finish_reason'];
       if (fr === 'content_filter') {
         const msg = JSON.stringify(choice);
-        const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 400, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0);
+        const log = makeLog({
+          apiKey: account.userId, model: req.model ?? '', endpoint: '/v1/messages',
+          stream: false, statusCode: 400, started, errorMessage: msg,
+          inputTokens: 0, outputTokens: 0, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps: 0,
+        });
         waitUntil(maybeLog(env, store, log));
         return contentFilterError(msg);
       }
@@ -166,7 +175,11 @@ async function handleNonStream(
     outputTokens = numOr((usage as Record<string, unknown>)['completion_tokens']);
   }
 
-  const log = makeLog(account.userId, req.model ?? '', '/v1/messages', false, 200, started, '', inputTokens, outputTokens, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0);
+  const log = makeLog({
+    apiKey: account.userId, model: req.model ?? '', endpoint: '/v1/messages',
+    stream: false, statusCode: 200, started, errorMessage: '',
+    inputTokens, outputTokens, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps: 0,
+  });
   waitUntil(maybeLog(env, store, log));
 
   return Response.json(resp);
@@ -224,7 +237,11 @@ async function handleStream(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     waitUntil(
-      maybeLog(env, store, makeLog(account.userId, req.model ?? '', '/v1/messages', true, 500, started, msg, 0, 0, ctx.data.client ?? '', ctx.data.userAgent ?? '', 0)),
+      maybeLog(env, store, makeLog({
+        apiKey: account.userId, model: req.model ?? '', endpoint: '/v1/messages',
+        stream: true, statusCode: 500, started, errorMessage: msg,
+        inputTokens: 0, outputTokens: 0, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps: 0,
+      })),
     );
     if (isTimeoutError(msg)) {
       return jsonError(504, `上游服务响应超时，请稍后重试。原始错误: ${msg}`);
@@ -293,25 +310,21 @@ async function handleStream(
           /* noop */
         }
       }
+      // firstChunkMs/lastChunkMs come from this background drain (the tee'd
+      // logBranch), so they reflect drain-read cadence, not exact upstream
+      // arrival — best-effort, like the try/catch around this drain.
       const genMs = lastChunkMs - firstChunkMs;
       const tps = genMs > 0 && outTk > 0 ? outTk / (genMs / 1000) : 0;
       const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
       if (enableLogging) {
         await store.logRequest(
-          makeLog(
-            account.userId,
-            model,
-            '/v1/messages',
-            true,
-            drainOk ? 200 : 500,
-            started,
-            drainOk ? '' : 'upstream stream error',
-            inTk,
-            outTk,
-            ctx.data.client ?? '',
-            ctx.data.userAgent ?? '',
-            tps,
-          ),
+          makeLog({
+            apiKey: account.userId, model, endpoint: '/v1/messages',
+            stream: true, statusCode: drainOk ? 200 : 500, started,
+            errorMessage: drainOk ? '' : 'upstream stream error',
+            inputTokens: inTk, outputTokens: outTk,
+            client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps,
+          }),
         );
       }
     })(),
@@ -649,37 +662,6 @@ function numOr(v: unknown): number {
     if (Number.isFinite(n)) return Math.trunc(n);
   }
   return 0;
-}
-
-/** Build a RequestLogRow. The `stream` field is 0/1 per the D1 schema. */
-function makeLog(
-  apiKey: string,
-  model: string,
-  endpoint: string,
-  stream: boolean,
-  statusCode: number,
-  started: number,
-  errorMessage: string,
-  inputTokens: number,
-  outputTokens: number,
-  client: string,
-  userAgent: string,
-  tps: number,
-): RequestLogRow {
-  return {
-    api_key: apiKey,
-    model,
-    endpoint,
-    client,
-    user_agent: userAgent,
-    stream: stream ? 1 : 0,
-    status_code: statusCode,
-    latency_ms: Date.now() - started,
-    error_message: errorMessage,
-    input_tokens: inputTokens,
-    output_tokens: outputTokens,
-    tps,
-  };
 }
 
 /** Log a request row only if request logging is enabled. */
