@@ -49,7 +49,7 @@ import {
 } from '../../src/translate/anthropic';
 import { encodeSSE, parseSSEChunk } from '../../src/translate/sse';
 
-const CHAT_ENDPOINT = '/api/saas/openai/v1/chat/completions';
+const CHAT_ENDPOINT = 'chat_completions';
 
 const SSE_HEADERS: Record<string, string> = {
   'Content-Type': 'text/event-stream; charset=utf-8',

@@ -12,7 +12,7 @@ import { createJoyClient } from '../../../../src/joycode/client';
 import { userIdParam } from '../../../../src/dashboard/account-views';
 import { notFound } from '../../../../src/util/http';
 
-const CHAT_ENDPOINT = '/api/saas/openai/v1/chat/completions';
+const CHAT_ENDPOINT = 'chat_completions';
 const PROBE_TIMEOUT_SEC = 15;
 
 interface DiagStep {
