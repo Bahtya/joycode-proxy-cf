@@ -4,8 +4,8 @@
 /**
  * ModelInfo describes a JoyCode AI model.
  *
- * Mirrors the JSON emitted by the upstream `/api/saas/models/v1/modelList`
- * endpoint. Field names are lowerCamelCase as used by the JoyCode API and
+ * Mirrors the JSON emitted by the upstream color gateway
+ * (functionId=joycode_modelList). Field names are lowerCamelCase as used by the JoyCode API and
  * must NOT be changed (Go types.go tags are the source of truth).
  *
  * See pkg/joycode/types.go:3-15.
@@ -28,7 +28,7 @@ export interface ModelInfo {
  * must be in this list to pass through, otherwise resolveModel falls back to the
  * account/system default.
  *
- * Synced to the live upstream catalog (verified via /api/saas/models/v1/modelList):
+ * Synced to the live upstream catalog (verified via joycode_modelList functionId):
  * JoyAI-Code-1.5 is the current flagship (replaces the stale 'JoyAI-Code');
  * Kimi-K2.5 and GLM-4.7 have been retired upstream. Order matters — MODELS[0] is
  * the final fallback default. (C1)

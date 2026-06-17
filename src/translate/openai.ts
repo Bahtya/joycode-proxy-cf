@@ -1,7 +1,7 @@
 // OpenAI request/response translation for the JoyCode upstream.
 // Ports pkg/openai/translate.go (TranslateRequest, TranslateResponse).
 //
-// The JoyCode /api/saas/openai/v1/chat/completions endpoint already speaks the
+// The JoyCode color gateway (api-ai.jd.com, functionId=chat_completions) already speaks the
 // OpenAI Chat Completions shape, so translation is mostly an envelope pass:
 // we re-project the inbound body into a clean record (mirroring Go's field
 // handling) and wrap the upstream response in an OpenAI completion envelope.

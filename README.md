@@ -18,7 +18,7 @@ Claude Code / Cursor / Windsurf
 │        ├─ 管理后台 API（账号 / 用量 / 设置 / JWT 鉴权）│
 │        └─ SSE 流式（ReadableStream）                   │
 │           ↓ fetch（ptKey 头）                          │
-│        JoyCode 上游（joycode-api.jd.com）             │
+│        JoyCode 上游（api-ai.jd.com，HMAC 签名）       │
 │   D1：accounts / settings / request_logs              │
 │   KV：扫码登录会话（cookie jar 外置）                 │
 └──────────────────────────────────────────────────────┘
