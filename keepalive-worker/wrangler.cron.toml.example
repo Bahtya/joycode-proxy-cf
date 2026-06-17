@@ -15,7 +15,7 @@ database_name = "joycode-proxy-db"
 database_id = "YOUR_D1_DATABASE_ID"   # 必须与 wrangler.toml 里的 database_id 一致
 
 [vars]
-JOYCODE_BASE_URL = "https://joycode-api.jd.com"
+JOYCODE_BASE_URL = "https://api-ai.jd.com"
 JOYCODE_CLIENT_VERSION = "2.4.5"
 
 # 密钥（用 `wrangler secret put --config keepalive-worker/wrangler.cron.toml` 设置）：

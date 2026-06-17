@@ -17,8 +17,7 @@ binding = "QR_SESSIONS"
 id = "YOUR_KV_NAMESPACE_ID"
 
 [vars]
-JOYCODE_BASE_URL = "https://joycode-api.jd.com"
-JOYCODE_SAAS_BASE_URL = "http://joycode-api-saas.jd.com"
+JOYCODE_BASE_URL = "https://api-ai.jd.com"
 JOYCODE_CLIENT_VERSION = "2.4.5"
 MAX_ACCOUNTS = "10"
 DEFAULT_TIMEOUT = "1800"

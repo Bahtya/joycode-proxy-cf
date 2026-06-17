@@ -103,7 +103,7 @@ export function resolveModel(
 
 /**
  * Convert an Anthropic Messages request into the OpenAI-shaped body sent to
- * JoyCode's `/api/saas/openai/v1/chat/completions`.
+ * JoyCode's color gateway (api-ai.jd.com, functionId=chat_completions).
  *
  * Faithful port of TranslateRequest (translate.go:15-43):
  *   - model: resolved via resolveModel (accountDefault/systemDefault optional)

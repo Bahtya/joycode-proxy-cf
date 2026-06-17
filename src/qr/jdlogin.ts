@@ -403,7 +403,7 @@ async function validateAndFetchInfo(
  * endpoint via the shared createJoyClient. Combines Go's buildLoginResult
  * (jdlogin.go:315-341) and fetchUserInfoWithPtKey (343-377). The client's
  * userInfo() already issues the exact request Go hand-rolls (POST
- * /api/saas/user/v1/userInfo with ptKey header + loginType N_PIN_PC), so we
+ * color gateway (api-ai.jd.com) via signed URL + ptKey/PIN_JD_CLOUD), so we
  * reuse it rather than re-implement the fetch.
  */
 async function buildLoginResult(env: Env, ptKey: string, ptPin: string): Promise<QRLoginResult> {
