@@ -256,79 +256,10 @@ async function handleStream(
 
   const model = req.model ?? '';
 
-  // tee() the upstream stream into two branches:
-  //   - transBranch: consumed by the OpenAI→Anthropic translation below (the
-  //     client-facing ReadableStream). It only needs chunks up to finish_reason.
-  //   - logBranch: drained fully in a background waitUntil to capture the FINAL
-  //     usage chunk (which OpenAI upstreams emit AFTER finish_reason) and write the
-  //     request log.
-  // This mirrors /v1/chat/completions and is the only drain pattern Workers
-  // reliably honors: flushing from inside the translation stream's start(), after
-  // controller.close(), is silently dropped once the response is sent.
-  const [transBranch, logBranch] = upstreamBody.tee();
-
-  waitUntil(
-    (async () => {
-      let inTk = 0;
-      let outTk = 0;
-      let drainOk = true;
-      let firstChunkMs = 0;
-      let lastChunkMs = 0;
-      const reader = logBranch.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const { events, rest } = parseSSEChunk(buffer);
-          buffer = rest;
-          for (const ev of events) {
-            const d = ev.data;
-            if (!d || d === '[DONE]') continue;
-            const now = Date.now();
-            if (!firstChunkMs) firstChunkMs = now;
-            lastChunkMs = now;
-            try {
-              const chunk = JSON.parse(d) as StreamChunk;
-              if (chunk && chunk.usage) {
-                inTk = chunk.usage.prompt_tokens ?? inTk;
-                outTk = chunk.usage.completion_tokens ?? outTk;
-              }
-            } catch {
-              /* swallow non-JSON / partial frames */
-            }
-          }
-        }
-      } catch {
-        drainOk = false;
-      } finally {
-        try {
-          reader.releaseLock();
-        } catch {
-          /* noop */
-        }
-      }
-      // firstChunkMs/lastChunkMs come from this background drain (the tee'd
-      // logBranch), so they reflect drain-read cadence, not exact upstream
-      // arrival — best-effort, like the try/catch around this drain.
-      const genMs = lastChunkMs - firstChunkMs;
-      const tps = genMs > 0 && outTk > 0 ? outTk / (genMs / 1000) : 0;
-      const enableLogging = (await getSetting(env.DB, 'enable_request_logging')) !== 'false';
-      if (enableLogging) {
-        await store.logRequest(
-          makeLog({
-            apiKey: account.userId, model, endpoint: '/v1/messages',
-            stream: true, statusCode: drainOk ? 200 : 500, started,
-            errorMessage: drainOk ? '' : 'upstream stream error',
-            inputTokens: inTk, outputTokens: outTk,
-            client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps,
-          }),
-        );
-      }
-    })(),
-  );
+  // Single consumer: the translation ReadableStream below reads upstreamBody
+  // directly (no tee) for real upstream-paced timing + inline usage capture by
+  // reading past finish_reason. (A background drain of a tee'd second branch read
+  // the buffered stream in a burst, collapsing the timing window → inflated TPS.)
 
   const msgID = msgId();
   // totalOutput counts CHARACTERS of emitted text; output_tokens = totalOutput/4
@@ -380,9 +311,15 @@ async function handleStream(
       );
       push(encodeSSE('ping', { type: 'ping' }));
 
-      const reader = transBranch.getReader();
+      const reader = upstreamBody.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      // Timing (real upstream-paced arrival) + usage captured on this live read.
+      let firstChunkMs = 0;
+      let lastChunkMs = 0;
+      let inTk = 0;
+      let outTk = 0;
+      let streamOk = true;
 
       const finish = (stopReason: string, errorMode: boolean) => {
         if (terminalSent) return; // idempotent — emit message_stop exactly once
@@ -447,6 +384,9 @@ async function handleStream(
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          const now = Date.now();
+          if (!firstChunkMs) firstChunkMs = now;
+          lastChunkMs = now;
           buffer += decoder.decode(value, { stream: true });
 
           // Feed complete frames into parseSSEChunk; keep the trailing partial.
@@ -465,8 +405,13 @@ async function handleStream(
               continue;
             }
 
-            // Usage is captured by the logBranch drain (see the waitUntil above),
-            // not here — the translation only needs choices/deltas up to finish_reason.
+            // Capture usage on the live read. The trailing usage chunk arrives
+            // AFTER finish_reason with no choices, so this must run before the
+            // choices short-circuit below.
+            if (chunk.usage) {
+              inTk = chunk.usage.prompt_tokens ?? inTk;
+              outTk = chunk.usage.completion_tokens ?? outTk;
+            }
 
             const choices = chunk.choices;
             if (!choices || choices.length === 0) continue;
@@ -546,14 +491,10 @@ async function handleStream(
             if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
               const fr = choice.finish_reason;
               finish(mapStopReason(fr), false);
-              try {
-                controller.close();
-              } catch {
-                /* already closed */
-              }
-              // The trailing usage chunk is captured by the logBranch drain, so the
-              // translation is done once the client has its terminal sequence.
-              return;
+              // Don't close/return: keep reading to capture the trailing usage chunk
+              // (OpenAI emits it after finish_reason), then exit at EOF. The
+              // controller closes once at EOF in the finally below; finish() is
+              // idempotent (terminalSent), so reads past finish_reason emit nothing.
             }
           }
         }
@@ -562,6 +503,7 @@ async function handleStream(
         // finish_reason (idempotent via terminalSent). (#1)
         finish('end_turn', false);
       } catch (err) {
+        streamOk = false;
         // Upstream stream errored mid-flight (abort/timeout/truncation). Surface it
         // as an Anthropic error event AND a terminal sequence so the SDK completes
         // instead of hanging on a silent/truncated turn. (#4)
@@ -590,9 +532,19 @@ async function handleStream(
         } catch {
           /* already closed */
         }
-        // Usage capture + the request log happen in the logBranch drain (see the
-        // waitUntil above). Do NOT flush here — flushing from start() after
-        // controller.close() is dropped by Workers once the response is sent.
+        // TPS from real upstream-paced timing; log via waitUntil so it survives
+        // past response send (the client stream is closed, but D1 writes persist).
+        const genMs = lastChunkMs - firstChunkMs;
+        const tps = genMs > 0 && outTk > 0 ? outTk / (genMs / 1000) : 0;
+        waitUntil(
+          maybeLog(env, store, makeLog({
+            apiKey: account.userId, model, endpoint: '/v1/messages',
+            stream: true, statusCode: streamOk ? 200 : 500, started,
+            errorMessage: streamOk ? '' : 'upstream stream error',
+            inputTokens: inTk, outputTokens: outTk,
+            client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps,
+          })),
+        );
       }
     },
   });

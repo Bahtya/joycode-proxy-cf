@@ -199,45 +199,31 @@ async function handleStream(
     return jsonError(502, 'upstream returned no body');
   }
 
-  const [clientBranch, logBranch] = body.tee();
-
-  // Drain logBranch in the background, parsing usage from the final chunk.
-  waitUntil(
-    (async () => {
-      let inputTokens = 0;
-      let outputTokens = 0;
-      let lastUsageObj: Record<string, unknown> | null = null;
-      let firstChunkMs = 0;
-      let lastChunkMs = 0;
-      const reader = logBranch.getReader();
+  // Single-pass: read upstream once (upstream-paced), forwarding each chunk to
+  // the client and stamping first→last-chunk arrival as data actually arrives.
+  // (Previously tee()+a background drain, which read the fully-buffered logBranch
+  // in a burst and collapsed the timing window to ~1ms → wildly inflated TPS.)
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let firstChunkMs = 0;
+      let lastChunkMs = 0;
+      let lastUsageObj: Record<string, unknown> | null = null;
       try {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          const now = Date.now();
+          if (!firstChunkMs) firstChunkMs = now;
+          lastChunkMs = now;
+          controller.enqueue(value); // forward to client immediately (low TTFT)
           buffer += decoder.decode(value, { stream: true });
-          // Process complete SSE events (terminated by \n\n).
           let idx: number;
           while ((idx = buffer.indexOf('\n\n')) !== -1) {
-            const event = buffer.slice(0, idx);
+            const usage = parseUsageFromEvent(buffer.slice(0, idx));
             buffer = buffer.slice(idx + 2);
-            // Stamp first→last content-chunk time only on frames carrying a real
-            // data line (skip [DONE] and keepalive `: ping` frames), matching the
-            // messages.ts drain — a raw includes('[DONE]') here would let pings
-            // shift the window on the OpenAI-native chat path.
-            const hasData = event.split('\n').some((l) => {
-              const s = l.endsWith('\r') ? l.slice(0, -1) : l;
-              if (!s.startsWith('data:')) return false;
-              const v = s.slice(5).trim();
-              return v !== '' && v !== '[DONE]';
-            });
-            if (hasData) {
-              const now = Date.now();
-              if (!firstChunkMs) firstChunkMs = now;
-              lastChunkMs = now;
-            }
-            const usage = parseUsageFromEvent(event);
             if (usage) lastUsageObj = usage;
           }
         }
@@ -247,37 +233,39 @@ async function handleStream(
           if (usage) lastUsageObj = usage;
         }
       } catch {
-        // Swallow: logging is best-effort.
+        // best-effort: keep the client response intact
       } finally {
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
         try {
           reader.releaseLock();
         } catch {
           /* noop */
         }
+        const inputTokens = lastUsageObj ? numOr(lastUsageObj['prompt_tokens']) : 0;
+        const outputTokens = lastUsageObj ? numOr(lastUsageObj['completion_tokens']) : 0;
+        const genMs = lastChunkMs - firstChunkMs;
+        const tps = genMs > 0 && outputTokens > 0 ? outputTokens / (genMs / 1000) : 0;
+        const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
+        if (enableLogging) {
+          waitUntil(
+            store.logRequest(
+              makeLog({
+                apiKey: account.userId, model, endpoint: '/v1/chat/completions',
+                stream: true, statusCode: 200, started, errorMessage: '',
+                inputTokens, outputTokens, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps,
+              })
+            )
+          );
+        }
       }
-      if (lastUsageObj) {
-        inputTokens = numOr(lastUsageObj['prompt_tokens']);
-        outputTokens = numOr(lastUsageObj['completion_tokens']);
-      }
-      // firstChunkMs/lastChunkMs come from this background drain (the tee'd
-      // logBranch), so they reflect drain-read cadence, not exact upstream
-      // arrival — best-effort, like the try/catch around this drain.
-      const genMs = lastChunkMs - firstChunkMs;
-      const tps = genMs > 0 && outputTokens > 0 ? outputTokens / (genMs / 1000) : 0;
-      const enableLogging = (await ensureSettings(ctx))['enable_request_logging'] !== 'false';
-      if (enableLogging) {
-        await store.logRequest(
-          makeLog({
-            apiKey: account.userId, model, endpoint: '/v1/chat/completions',
-            stream: true, statusCode: 200, started, errorMessage: '',
-            inputTokens, outputTokens, client: ctx.data.client ?? '', userAgent: ctx.data.userAgent ?? '', tps,
-          })
-        );
-      }
-    })()
-  );
+    },
+  });
 
-  return new Response(clientBranch, { headers: SSE_HEADERS });
+  return new Response(stream, { headers: SSE_HEADERS });
 }
 
 /**
