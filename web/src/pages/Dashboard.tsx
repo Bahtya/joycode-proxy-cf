@@ -236,14 +236,24 @@ const Dashboard: React.FC = () => {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-end gap-[2px] h-10">
-            {availFrames.map((f, i) => (
-              <div
-                key={i}
-                title={f ? `${f.ts} · ${f.ok ? "正常" : "异常"} · chat ${f.chat_ms}ms · ping ${f.ping_ms}ms` : "无数据"}
-                className={`flex-1 min-w-[3px] rounded-sm ${f ? (f.ok ? "bg-emerald-500" : "bg-red-500") : "bg-muted-foreground/20"}`}
-                style={{ height: f ? "100%" : "40%" }}
-              />
-            ))}
+            {availFrames.map((f, i) => {
+              const color = !f
+                ? "bg-muted-foreground/20"
+                : f.ok === 0
+                  ? "bg-red-500"
+                  : f.chat_ms >= 10000
+                    ? "bg-amber-500"
+                    : "bg-emerald-500"
+              const height = !f ? "40%" : f.ok === 0 ? "50%" : "100%"
+              return (
+                <div
+                  key={i}
+                  title={f ? `${f.ts} · ${f.ok ? (f.chat_ms >= 10000 ? "慢" : "正常") : "异常"} · chat ${f.chat_ms}ms · ping ${f.ping_ms}ms` : "无数据"}
+                  className={`flex-1 min-w-[3px] rounded-sm ${color}`}
+                  style={{ height }}
+                />
+              )
+            })}
           </div>
           <div className="grid grid-cols-3 gap-3">
             <StatisticCard
@@ -259,7 +269,7 @@ const Dashboard: React.FC = () => {
             <StatisticCard
               label="可用率"
               value={<span className={availRate >= 95 ? "text-emerald-600" : "text-red-500"}>{availRate}%</span>}
-              sub={`绿 ${greenCount}/${AVAIL_FRAMES}`}
+              sub={undefined}
               icon={<CheckCircle2 className={`size-4 ${availRate >= 95 ? "text-emerald-600" : "text-red-500"}`} />}
             />
           </div>
