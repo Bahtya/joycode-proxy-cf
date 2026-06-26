@@ -1,13 +1,12 @@
 import React, { useEffect, useState, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
-import { toast, Toaster } from 'sonner';
+import { Toaster } from 'sonner';
 import MainLayout from './layouts/MainLayout';
 import Login from './pages/Login';
 import Setup from './pages/Setup';
 import ForgotPassword from './pages/ForgotPassword';
-import OAuthError from './pages/OAuthError';
-import { authApi, isAuthenticated, setToken } from './api';
+import { authApi, isAuthenticated } from './api';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Accounts = lazy(() => import('./pages/Accounts'));
@@ -19,33 +18,6 @@ const pageLoading = (
     <Loader2 className="size-8 animate-spin text-primary" />
   </div>
 );
-
-const OAuthCallback: React.FC = () => {
-  const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    const loginSuccess = searchParams.get('login_success');
-    const loginError = searchParams.get('login_error');
-
-    if (loginSuccess) {
-      const jwtCookie = document.cookie.split('; ').find((c) => c.startsWith('joycode_auto_jwt='));
-      if (jwtCookie) {
-        const token = jwtCookie.split('=')[1];
-        if (token) setToken(token);
-        document.cookie = 'joycode_auto_jwt=; path=/; max-age=0';
-      }
-      toast.success(`登录成功！账号「${loginSuccess}」已添加`);
-      navigate('/accounts', { replace: true });
-    } else if (loginError) {
-      navigate(`/oauth-error?error=${encodeURIComponent(loginError)}`, { replace: true });
-    } else {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [searchParams, navigate]);
-
-  return pageLoading;
-};
 
 const AuthGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [checking, setChecking] = useState(true);
@@ -88,14 +60,13 @@ const App: React.FC = () => (
         <Route path="/setup" element={<Setup />} />
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/oauth-error" element={<OAuthError />} />
         <Route element={<AuthGuard><MainLayout /></AuthGuard>}>
           <Route path="/dashboard" element={<Suspense fallback={pageLoading}><Dashboard /></Suspense>} />
           <Route path="/accounts" element={<Suspense fallback={pageLoading}><Accounts /></Suspense>} />
           <Route path="/accounts/:userId" element={<Suspense fallback={pageLoading}><AccountDetail /></Suspense>} />
           <Route path="/settings" element={<Suspense fallback={pageLoading}><Settings /></Suspense>} />
         </Route>
-        <Route path="/" element={<OAuthCallback />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </BrowserRouter>
   </>

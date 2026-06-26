@@ -22,6 +22,7 @@
 import { createStore, RAW_LIVE_WINDOW_DAYS } from '../../src/store/d1';
 import { createJoyClient } from '../../src/joycode/client';
 import { getIntSetting } from '../../src/store/settings';
+import type { Account } from '../../src/types';
 
 /**
  * Bindings available to the cron Worker. Intentionally narrower than the full
@@ -132,8 +133,18 @@ const PROBE_CHAT_ENDPOINT = 'chat_completions';
  */
 async function runAvailabilityProbe(env: CronEnv): Promise<void> {
   const store = createStore(env.DB, env.PTKEY_ENC_KEY);
-  const account = await store.getDefaultAccount();
-  if (!account || !account.userId) return; // no account configured — nothing to probe
+  // The availability card should reflect "can the proxy serve at all", not "is the
+  // specific default account alive". A default whose session has lapsed
+  // (credential_valid=0) returns empty choices and would black out the whole card
+  // even when other accounts are healthy. So prefer the default if it isn't known-
+  // invalid, else the first non-invalid account, else fall back to the default so
+  // its real failure is still recorded rather than the probe silently skipping.
+  const all = await store.listAccounts();
+  if (all.length === 0) return; // no account configured — nothing to probe
+  const probeable = (a: Account | undefined): a is Account => !!a && !!a.userId && a.credentialValid !== 0;
+  const def: Account = all.find((a) => a.isDefault) ?? all[0]!;
+  const account: Account = probeable(def) ? def : (all.find(probeable) ?? def);
+  if (!account.userId) return;
 
   const client = createJoyClient({
     ptKey: account.ptKey,

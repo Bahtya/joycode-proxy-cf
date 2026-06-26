@@ -29,8 +29,6 @@ const WHITELIST = new Set<string>([
   '/api/auth/setup',
   '/api/auth/login',
   '/api/health',
-  '/api/browser-login',
-  '/api/oauth-callback',
   '/api/oauth-submit',
   '/api/qr-login/init',
 ]);

@@ -93,12 +93,25 @@ export class Store {
     const apiToken =
       a.apiToken && a.apiToken.trim() !== '' ? a.apiToken : 'sk-' + hexId(16);
     if (isDefault) await this.db.prepare('UPDATE accounts SET is_default = 0').run();
+    // Upsert on user_id (PRIMARY KEY): a re-login of an EXISTING account (same JD
+    // user_id — e.g. reviving an expired credential) refreshes pt_key and resets
+    // credential_valid=1 instead of throwing UNIQUE-constraint failure. Only the
+    // credential-related columns are touched on conflict; nickname/remark/
+    // api_token/default_model/created_at/display_order are preserved, and is_default
+    // is never demoted (MAX keeps an existing default default, promotes if the
+    // caller asked). New accounts take the full VALUES row exactly as before.
     await this.db
       .prepare(
         `INSERT INTO accounts
           (user_id, nickname, remark, api_token, pt_key, is_default, default_model, created_at, updated_at, credential_refreshed_at, credential_valid, display_order)
          VALUES (?,?,?,?,?,?,?,datetime('now'),datetime('now'),'',-1,
-           COALESCE((SELECT MAX(display_order) FROM accounts), -1) + 1)`
+           COALESCE((SELECT MAX(display_order) FROM accounts), -1) + 1)
+         ON CONFLICT(user_id) DO UPDATE SET
+           pt_key = excluded.pt_key,
+           is_default = MAX(is_default, excluded.is_default),
+           credential_valid = 1,
+           credential_refreshed_at = datetime('now'),
+           updated_at = datetime('now')`
       )
       .bind(
         a.userId,

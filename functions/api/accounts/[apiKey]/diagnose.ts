@@ -104,15 +104,21 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, params }) => {
       max_tokens: 1,
     });
     const usage = resp?.usage;
+    // A dead/expiring ptKey degrades to HTTP 200 with an empty choices array — and
+    // client.post only throws on non-200 or JSON-parse failure, so without this
+    // check a lapsed credential shows a false ✓ here while the availability probe
+    // (which does verify choices) correctly goes red.
+    const choicesOk = Array.isArray(resp?.choices) && resp.choices.length > 0;
     steps.push({
       key: 'chat',
       label: 'LLM 端点→上游',
-      ok: true,
+      ok: choicesOk,
       latency_ms: Date.now() - t2,
       model: probeModel,
       prompt_tokens: usage?.prompt_tokens,
       completion_tokens: usage?.completion_tokens,
       finish_reason: resp?.choices?.[0]?.finish_reason,
+      detail: choicesOk ? undefined : 'empty response (no choices)',
     });
   } catch (e) {
     steps.push({

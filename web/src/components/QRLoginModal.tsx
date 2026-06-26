@@ -1,13 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import {
   RefreshCw,
   CheckCircle2,
   XCircle,
-  ShieldCheck,
-  LogIn,
-  Info,
+  ExternalLink,
   AlertTriangle,
-  ShieldAlert,
   Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -25,49 +23,37 @@ interface QRLoginModalProps {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  onAutoLogin: () => void;
 }
 
-type Status =
-  | 'loading'
-  | 'waiting'
-  | 'scanned'
-  | 'confirmed'
-  | 'expired'
-  | 'error'
-  | 'verification_required';
+type Status = 'loading' | 'waiting' | 'confirmed' | 'expired' | 'error';
 
-const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalProps) => {
-  const [qrImage, setQrImage] = useState('');
+const QRLoginModal = ({ open, onClose, onSuccess }: QRLoginModalProps) => {
+  const [url, setUrl] = useState('');
   const [status, setStatus] = useState<Status>('loading');
-  const [countdown, setCountdown] = useState(180);
+  const [countdown, setCountdown] = useState(300);
   const [errorMsg, setErrorMsg] = useState('');
-  const [verifyURL, setVerifyURL] = useState('');
   const [pollTrigger, setPollTrigger] = useState(0);
   const sessionIdRef = useRef('');
   const pollTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onSuccessRef = useRef(onSuccess);
   const onCloseRef = useRef(onClose);
-  const onAutoLoginRef = useRef(onAutoLogin);
 
   onSuccessRef.current = onSuccess;
   onCloseRef.current = onClose;
-  onAutoLoginRef.current = onAutoLogin;
 
   const initQR = useCallback(async () => {
     setStatus('loading');
-    setCountdown(180);
+    setCountdown(300);
     setErrorMsg('');
-    setVerifyURL('');
     try {
       const result = await api.qrLoginInit();
-      setQrImage(result.qr_image);
+      setUrl(result.url);
       sessionIdRef.current = result.session_id;
       setStatus('waiting');
       setPollTrigger((c) => c + 1);
     } catch (e: unknown) {
       setStatus('error');
-      const msg = e instanceof Error ? e.message : '生成二维码失败';
+      const msg = e instanceof Error ? e.message : '生成登录会话失败';
       setErrorMsg(msg);
       toast.error(msg);
     }
@@ -77,7 +63,7 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
     if (open) {
       initQR();
     } else {
-      setQrImage('');
+      setUrl('');
       sessionIdRef.current = '';
       setStatus('loading');
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
@@ -86,7 +72,7 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
 
   useEffect(() => {
     if (!open) return;
-    if (status !== 'waiting' && status !== 'scanned') return;
+    if (status !== 'waiting') return;
 
     const poll = async () => {
       const sid = sessionIdRef.current;
@@ -96,7 +82,7 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
       }
       try {
         const result = await api.qrLoginStatus(sid);
-        if (result.status === 'confirmed') {
+        if (result.status === 'success') {
           setStatus('confirmed');
           toast.success('登录成功！账号已添加');
           setTimeout(() => {
@@ -109,12 +95,6 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
           setStatus('expired');
           return;
         }
-        if (result.status === 'verification_required') {
-          setStatus('verification_required');
-          setVerifyURL(result.verify_url || '');
-          setErrorMsg(result.message || 'JD 风控验证');
-          return;
-        }
         if (result.status === 'error') {
           setStatus('error');
           const m = result.message || '登录失败';
@@ -122,11 +102,9 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
           toast.error(m);
           return;
         }
-        if (result.status === 'scanned') {
-          setStatus('scanned');
-        }
+        // 'waiting' — keep polling.
       } catch {
-        // Continue polling on network error
+        // Continue polling on network error.
       }
       pollTimerRef.current = setTimeout(poll, 3000);
     };
@@ -135,10 +113,10 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
     return () => {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
-  }, [open, pollTrigger]);
+  }, [open, pollTrigger, status]);
 
   useEffect(() => {
-    if (!open || status === 'confirmed' || status === 'expired' || status === 'loading' || status === 'verification_required') return;
+    if (!open || status === 'confirmed' || status === 'expired' || status === 'loading' || status === 'error') return;
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -151,11 +129,6 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
     return () => clearInterval(timer);
   }, [open, status]);
 
-  const handleAutoLogin = () => {
-    onCloseRef.current();
-    onAutoLoginRef.current();
-  };
-
   const fmtCountdown = `${Math.floor(countdown / 60)}:${String(countdown % 60).padStart(2, '0')}`;
 
   const renderStatus = () => {
@@ -164,7 +137,7 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
         return (
           <div className="flex flex-col items-center gap-3 py-6 text-center">
             <Loader2 className="size-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">正在生成二维码...</p>
+            <p className="text-sm text-muted-foreground">正在生成登录链接...</p>
           </div>
         );
 
@@ -172,28 +145,12 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
         return (
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/40 p-3 text-sm">
             <div className="flex items-start gap-2">
-              <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-primary" />
               <div className="flex flex-col gap-1">
-                <span>请使用京东 APP 扫描上方二维码</span>
-                <span className="text-muted-foreground">{`二维码有效期剩余 ${fmtCountdown}`}</span>
-                <button
-                  type="button"
-                  onClick={handleAutoLogin}
-                  className="inline-flex w-fit items-center gap-1 text-primary hover:underline"
-                >
-                  <LogIn className="size-3.5" />
-                  推荐使用「一键登录」从本机 JoyCode 自动导入
-                </button>
+                <span>用京东 App 扫描上方二维码，或点下方按钮在浏览器登录</span>
+                <span className="text-muted-foreground">{`登录链接有效期剩余 ${fmtCountdown}`}</span>
               </div>
             </div>
-          </div>
-        );
-
-      case 'scanned':
-        return (
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm text-primary">
-            <Loader2 className="size-4 shrink-0 animate-spin" />
-            已扫描，请在手机上确认登录...
           </div>
         );
 
@@ -210,36 +167,11 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
           <div className="flex flex-col items-center gap-3">
             <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-3 text-sm text-amber-600">
               <XCircle className="size-4 shrink-0" />
-              二维码已过期
+              登录链接已过期
             </div>
             <Button variant="outline" size="sm" onClick={initQR}>
               <RefreshCw className="size-4" />
-              刷新二维码
-            </Button>
-          </div>
-        );
-
-      case 'verification_required':
-        return (
-          <div className="flex flex-col items-center gap-3">
-            <div className="flex w-full items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
-              <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
-              <div className="flex flex-col gap-0.5">
-                <span className="font-medium text-amber-700">京东安全验证</span>
-                <span className="text-muted-foreground">{errorMsg || '京东检测到登录风险，需要完成安全验证。'}</span>
-              </div>
-            </div>
-            {verifyURL && (
-              <Button size="sm" asChild>
-                <a href={verifyURL} target="_blank" rel="noopener noreferrer">
-                  <ShieldCheck className="size-4" />
-                  打开安全验证页面
-                </a>
-              </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={initQR}>
-              <RefreshCw className="size-4" />
-              重新扫码
+              刷新链接
             </Button>
           </div>
         );
@@ -249,22 +181,11 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
           <div className="flex flex-col items-center gap-3">
             <div className="flex w-full items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
-              <div className="flex flex-col gap-0.5">
-                <span className="font-medium text-destructive">{errorMsg || '登录失败'}</span>
-                {errorMsg?.includes('pt_key') && (
-                  <span className="text-muted-foreground">
-                    京东扫码登录接口已变更，请使用一键登录自动导入凭据。
-                  </span>
-                )}
-              </div>
+              <span className="font-medium text-destructive">{errorMsg || '登录失败'}</span>
             </div>
-            <Button size="sm" onClick={handleAutoLogin}>
-              <LogIn className="size-4" />
-              一键登录（推荐）
-            </Button>
             <Button variant="outline" size="sm" onClick={initQR}>
               <RefreshCw className="size-4" />
-              重试扫码
+              重试
             </Button>
           </div>
         );
@@ -280,14 +201,24 @@ const QRLoginModal = ({ open, onClose, onSuccess, onAutoLogin }: QRLoginModalPro
         <DialogHeader>
           <DialogTitle>扫码登录</DialogTitle>
           <DialogDescription>
-            使用京东 APP 扫描二维码登录。如遇问题，推荐使用「一键登录」自动导入。
+            使用京东 App 扫描二维码，或在浏览器打开链接完成授权。
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col items-center gap-4">
-          {qrImage && status !== 'confirmed' && (
-            <div className="rounded-lg border border-border bg-white p-3 shadow-sm">
-              <img src={qrImage} alt="QR Code" className="size-48" />
+          {url && status !== 'confirmed' && (
+            <div className="flex flex-col items-center gap-2">
+              <div className="rounded-lg border border-border bg-white p-3 shadow-sm">
+                <QRCodeSVG value={url} size={192} />
+              </div>
+              {url && (
+                <Button variant="ghost" size="sm" asChild className="text-xs">
+                  <a href={url} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink className="size-3.5" />
+                    在浏览器打开链接
+                  </a>
+                </Button>
+              )}
             </div>
           )}
           {renderStatus()}

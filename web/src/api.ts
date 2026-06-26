@@ -234,22 +234,16 @@ export const api = {
     request<{ logs: RequestLog[]; total: number }>(`/api/accounts/${encodeURIComponent(userId)}/logs?limit=${limit}`),
   renewToken: (userId: string) =>
     request<{ ok: boolean; api_token: string }>(`/api/accounts/${encodeURIComponent(userId)}/renew-token`, { method: 'POST' }),
-  autoLogin: () =>
-    request<{ ok: boolean; user_id: string; nickname: string; real_name: string; is_default: boolean }>('/api/accounts-auto-login', { method: 'POST' }),
   qrLoginInit: () =>
-    request<{ ok: boolean; session_id: string; qr_image: string }>('/api/qr-login/init', { method: 'POST' }),
+    request<{ ok: boolean; session_id: string; url: string }>('/api/qr-login/init', { method: 'POST' }),
   qrLoginStatus: (sessionId: string) =>
-    request<{ status: string; ok?: boolean; user_id?: string; nickname?: string; real_name?: string; message?: string; verify_url?: string; risk_code?: number }>(`/api/qr-login/status?session=${encodeURIComponent(sessionId)}`),
-  browserLogin: () =>
-    request<{ ok: boolean; url: string; token: string }>('/api/browser-login', { method: 'POST' }),
+    request<{ status: string; ok?: boolean; user_id?: string; nickname?: string; message?: string }>(`/api/qr-login/status?session=${encodeURIComponent(sessionId)}`),
   oauthSubmit: (ptKey: string) =>
     request<{ ok: boolean; user_id: string; nickname: string }>('/api/oauth-submit', { method: 'POST', body: JSON.stringify({ pt_key: ptKey }) }),
   getRecentErrors: (limit = 50) =>
     request<{ errors: RequestLog[]; total: number }>(`/api/errors?limit=${limit}`),
   clearAllAccounts: () =>
     request<{ ok: boolean; count: number }>('/api/accounts-clear-all', { method: 'POST' }),
-  clearJoyCodeSession: () =>
-    request<{ ok: boolean; message: string }>('/api/clear-joycode-session', { method: 'POST' }),
   updateRemark: (userId: string, remark: string) =>
     request<{ ok: boolean }>(`/api/accounts/${encodeURIComponent(userId)}/remark`, { method: 'PUT', body: JSON.stringify({ remark }) }),
   reorderAccounts: (userIds: string[]) =>

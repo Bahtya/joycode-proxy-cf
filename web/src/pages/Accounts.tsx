@@ -25,7 +25,6 @@ import {
   QrCode,
   RefreshCw,
   HelpCircle,
-  Eraser,
   Pencil,
   CheckCircle2,
   XCircle,
@@ -202,6 +201,13 @@ const CredentialBadge = ({ record }: { record: Account }) => {
   );
 };
 
+// Scan-to-login via jdhgpt pollLoginInfo is implemented but its host
+// (jdhgpt.jd.com) is JD-internal and unreachable from the public edge, so the
+// entry is disabled for now. The QR machinery (QRLoginModal, src/qr/jdhlogin.ts,
+// /api/qr-login/*) is retained for when a reachable server-side login exists —
+// flip this to re-enable the UI entry points.
+const QR_LOGIN_ENABLED = false;
+
 const Accounts: React.FC = () => {
   const isMobile = useIsMobile();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -214,7 +220,6 @@ const Accounts: React.FC = () => {
     is_default: false,
   });
   const [diagTarget, setDiagTarget] = useState<Account | null>(null);
-  const [autoLogging, setAutoLogging] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<string>('');
@@ -224,7 +229,6 @@ const Accounts: React.FC = () => {
   const [modelOptions, setModelOptions] = useState<{ label: string; value: string }[]>([]);
 
   // AlertDialog confirm states
-  const [clearSessionOpen, setClearSessionOpen] = useState(false);
   const [renewTarget, setRenewTarget] = useState<Account | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Account | null>(null);
 
@@ -277,19 +281,6 @@ const Accounts: React.FC = () => {
       fetchAccounts();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '添加账号失败');
-    }
-  };
-
-  const handleAutoLogin = async () => {
-    setAutoLogging(true);
-    try {
-      const result = await api.autoLogin();
-      toast.success(`一键登录成功！账号「${result.nickname || result.user_id}」已添加`);
-      fetchAccounts();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '一键登录失败');
-    } finally {
-      setAutoLogging(false);
     }
   };
 
@@ -400,15 +391,6 @@ const Accounts: React.FC = () => {
     }
   };
 
-  const clearJoyCodeSession = async () => {
-    try {
-      const result = await api.clearJoyCodeSession();
-      toast.success(result.message || 'JoyCode 本地会话已清除');
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '清除会话失败');
-    }
-  };
-
   const openRename = (record: Account) => {
     setRenameTarget(record.user_id);
     setRenameValue(record.remark || accountDisplayName(record));
@@ -425,18 +407,12 @@ const Accounts: React.FC = () => {
               <RefreshCw />
               刷新
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setQrModalOpen(true)}>
-              <QrCode />
-              扫码登录
-            </Button>
-            <Button size="sm" onClick={handleAutoLogin} disabled={autoLogging}>
-              {autoLogging ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
-              一键导入本地JoyCode已登录账户
-            </Button>
-            <Button variant="destructive" size="sm" onClick={() => setClearSessionOpen(true)}>
-              <Eraser />
-              清空本地JoyCode会话
-            </Button>
+            {QR_LOGIN_ENABLED && (
+              <Button variant="outline" size="sm" onClick={() => setQrModalOpen(true)}>
+                <QrCode />
+                扫码登录
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={exportAccounts}>
               <Download />
               导出账号
@@ -484,7 +460,9 @@ const Accounts: React.FC = () => {
                   {accounts.length === 0 && !loading && (
                     <TableRow>
                       <TableCell colSpan={12} className="h-24 text-center text-muted-foreground">
-                        暂无账号，请点击「扫码登录」按钮配置您的第一个 JoyCode 账号
+                        {QR_LOGIN_ENABLED
+                          ? '暂无账号，请点击「扫码登录」按钮配置您的第一个 JoyCode 账号'
+                          : '暂无账号，请点击「手动添加」按钮，粘贴 JoyCode ptKey 配置第一个账号'}
                       </TableCell>
                     </TableRow>
                   )}
@@ -496,6 +474,7 @@ const Accounts: React.FC = () => {
                       onRename={openRename}
                       onSetDefault={handleSetDefault}
                       onDiagnose={setDiagTarget}
+                      onReLogin={() => setQrModalOpen(true)}
                       onRequestRenew={setRenewTarget}
                       onRequestRemove={setRemoveTarget}
                     />
@@ -638,24 +617,7 @@ const Accounts: React.FC = () => {
           open={qrModalOpen}
           onClose={() => setQrModalOpen(false)}
           onSuccess={fetchAccounts}
-          onAutoLogin={handleAutoLogin}
         />
-
-        {/* 清空本地会话 */}
-        <AlertDialog open={clearSessionOpen} onOpenChange={setClearSessionOpen}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>确定要清空本地 JoyCode IDE 的登录会话吗？</AlertDialogTitle>
-              <AlertDialogDescription>
-                清除后 JoyCode IDE 将需要重新登录，此操作不影响已导入的账号
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction variant="destructive" onClick={clearJoyCodeSession}>确定</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
 
         {/* 重置 Token */}
         <AlertDialog open={!!renewTarget} onOpenChange={(o) => { if (!o) setRenewTarget(null); }}>
@@ -712,6 +674,7 @@ interface SortableRowProps {
   onRename: (record: Account) => void;
   onSetDefault: (userId: string, displayName: string) => void;
   onDiagnose: (record: Account) => void;
+  onReLogin: (record: Account) => void;
   onRequestRenew: (record: Account) => void;
   onRequestRemove: (record: Account) => void;
 }
@@ -722,6 +685,7 @@ const SortableRow: React.FC<SortableRowProps> = ({
   onRename,
   onSetDefault,
   onDiagnose,
+  onReLogin,
   onRequestRenew,
   onRequestRemove,
 }) => {
@@ -763,6 +727,11 @@ const SortableRow: React.FC<SortableRowProps> = ({
           >
             <ShieldCheck /> 验证
           </Button>
+          {QR_LOGIN_ENABLED && (
+            <Button variant="outline" size="xs" onClick={(e) => { e.stopPropagation(); onReLogin(record); }}>
+              <QrCode /> 重新登录
+            </Button>
+          )}
           <Button variant="destructive" size="xs" onClick={(e) => { e.stopPropagation(); onRequestRemove(record); }}>
             <Trash2 /> 删除
           </Button>
@@ -788,6 +757,11 @@ const SortableRow: React.FC<SortableRowProps> = ({
           <DropdownMenuItem onSelect={() => onDiagnose(record)}>
             <ShieldCheck /> 验证
           </DropdownMenuItem>
+          {QR_LOGIN_ENABLED && (
+            <DropdownMenuItem onSelect={() => onReLogin(record)}>
+              <QrCode /> 重新登录
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onSelect={() => onRequestRenew(record)}>
             <KeyRound /> 重置 Token
